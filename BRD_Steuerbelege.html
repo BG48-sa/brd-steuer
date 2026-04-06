@@ -1348,6 +1348,11 @@ function renderExport() {
     <button class="export-btn" onclick="doPrint()">🖨️ Drucken / Als PDF speichern</button>
     <button class="export-btn" onclick="wDoExport()">📤 Wohnungen Anlage V exportieren</button>
     <button class="export-btn" onclick="doCopy()">📋 Zusammenfassung kopieren</button>
+    <div class="sec-hdr">Datensicherung</div>
+    <button class="export-btn" style="color:var(--green);border:2px solid var(--green)" onclick="doBackup()">💾 Backup erstellen & speichern</button>
+    <button class="export-btn" style="color:var(--orange);border:2px solid var(--orange)" onclick="document.getElementById('restore-input').click()">📂 Backup wiederherstellen</button>
+    <input type="file" id="restore-input" accept=".json" style="display:none" onchange="doRestore(this)">
+    <div style="margin:8px 16px 0;font-size:12px;color:var(--gray1);text-align:center">💡 Backup regelmäßig erstellen und in iCloud oder per E-Mail sichern</div>
     <div class="spacer"></div>`;
 
   document.getElementById('export-content').innerHTML = html;
@@ -1960,6 +1965,89 @@ initDB()
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
   }
+
+// ════════════════════════════════════════════
+//  BACKUP & RESTORE
+// ════════════════════════════════════════════
+
+async function doBackup() {
+  toast('⏳ Backup wird erstellt…');
+  try {
+    // 1. collect all file records from IndexedDB
+    const fileRecords = await new Promise((res, rej) => {
+      const tx  = db.transaction('files', 'readonly');
+      const req = tx.objectStore('files').getAll();
+      req.onsuccess = () => res(req.result);
+      req.onerror   = () => rej(req.error);
+    });
+
+    // 2. convert ArrayBuffer data to base64 for JSON storage
+    const filesB64 = fileRecords.map(r => ({
+      id:   r.id,
+      name: r.name,
+      type: r.type,
+      data: btoa(String.fromCharCode(...new Uint8Array(r.data)))
+    }));
+
+    // 3. assemble backup object
+    const backup = {
+      version:   1,
+      createdAt: new Date().toISOString(),
+      brd_docs:  getDocs(),
+      imm_txs:   wGetTxs(),
+      files:     filesB64
+    };
+
+    // 4. download as JSON file
+    const json = JSON.stringify(backup);
+    const blob = new Blob([json], { type: 'application/json' });
+    const url  = URL.createObjectURL(blob);
+    const date = new Date().toISOString().split('T')[0];
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `BRD_Steuer_Backup_${date}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 5000);
+    toast('✅ Backup gespeichert!');
+  } catch(e) {
+    toast('⚠️ Backup fehlgeschlagen: ' + e.message);
+  }
+}
+
+async function doRestore(input) {
+  const file = input.files[0];
+  if (!file) return;
+  if (!confirm('⚠️ Alle aktuellen Daten werden durch das Backup ersetzt. Fortfahren?')) {
+    input.value = ''; return;
+  }
+  try {
+    toast('⏳ Backup wird wiederhergestellt…');
+    const text   = await file.text();
+    const backup = JSON.parse(text);
+    if (!backup.version || !backup.brd_docs || !backup.imm_txs) {
+      toast('⚠️ Ungültige Backup-Datei'); input.value=''; return;
+    }
+
+    // restore localStorage
+    saveDocs(backup.brd_docs);
+    wSaveTxs(backup.imm_txs);
+
+    // restore files to IndexedDB
+    for (const r of (backup.files || [])) {
+      const bytes = Uint8Array.from(atob(r.data), c => c.charCodeAt(0));
+      await dbPut(r.id, bytes.buffer, r.type, r.name);
+    }
+
+    input.value = '';
+    toast('✅ Backup erfolgreich wiederhergestellt!');
+    renderOverview();
+  } catch(e) {
+    toast('⚠️ Fehler beim Wiederherstellen: ' + e.message);
+    input.value = '';
+  }
+}
 </script>
 </body>
 </html>
