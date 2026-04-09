@@ -2229,16 +2229,16 @@ const TAX_RULES = [
   // ── Mieteinnahmen & Immobilien ── (confirmed tax relevant)
   { pattern: /\bmiete\b|kaltmiete|mieteinnahme|miete\s+whg|miete\s+\d|miete\s+[a-z]/i,              sectionId:'wohnungen',       typeId:'wohnungen_allgemein',       label:'Mieteinnahme',                needsReview:false },
   { pattern: /grundsteuer/i,                                                                            sectionId:'wohnungen',       typeId:'wohnungen_allgemein',       label:'Grundsteuer',                 needsReview:false },
-  { pattern: /hausverwaltung|hausgeld|wohnungseigent|monatsgeld|wohnlast|hausgeld|weg\b/i,           sectionId:'wohnungen',       typeId:'wohnungen_allgemein',       label:'Hausverwaltung',              needsReview:false },
+  { pattern: /hausverwaltung|hausgeld|wohnungseigent|monatsgeld|wohnlast|weg\b|hausgeld|ueberzahlung.{0,20}hausgeld|kostentragung|abrechnung.{0,30}vorschuss/i, sectionId:'wohnungen', typeId:'wohnungen_allgemein', label:'Hausverwaltung', needsReview:false },
   { pattern: /reparatur|instandhaltung|handwerker|renovierung|sanit|elektriker/i,                      sectionId:'wohnungen',       typeId:'wohnungen_allgemein',       label:'Reparatur/Renovierung',       needsReview:false },
   // ── Garagen ──
   { pattern: /garage|stellplatz|tiefgarage|parkplatz|garagenstellplatz/i,                              sectionId:'garagen',         typeId:'garage_sarnthein',          label:'Garage/Stellplatz',           needsReview:false },
   // ── Kapitalerträge ──
-  { pattern: /zinsen|dividenden|dividende|ertraege|ertrage|kapitalertrag|depot/i,                      sectionId:'deutsche_bank',   typeId:'jahressteuerbescheinigung', label:'Kapitalertrag/Zinsen',        needsReview:false },
+  { pattern: /zinsen|dividenden|dividende|ertraege|ertrage|kapitalertrag|depot|dividend|interest|securities|custody.?fee/i, sectionId:'deutsche_bank', typeId:'jahressteuerbescheinigung', label:'Kapitalertrag/Zinsen', needsReview:false },
   // ── Versicherungen ──
   { pattern: /krankenversicherung|krankenkasse|hallesche|aok\b|barmer|dak\b|ikk|bkk|pflegeversicherung/i, sectionId:'hallesche_kv', typeId:'hallesche_kv_brief',        label:'Kranken-/Pflegeversicherung', needsReview:false },
   { pattern: /haftpflicht|hausratversicherung|geb.udeversicherung|rechtsschutz/i,                      sectionId:'sonstiges',       typeId:'sonstiges_allgemein',       label:'Versicherung',                needsReview:false },
-  { pattern: /rentenversicherung|drv\b|deutsche rentenversicherung|\bpension\b|\bversorgung\b|betriebsrente/i, sectionId:'deutsche_rente', typeId:'rente_brief', label:'Rente/Pension', needsReview:false },
+  { pattern: /rentenversicherung|drv\b|deutsche rentenversicherung|\bpension\b|\bversorgung\b|betriebsrente|wages.*pension|salary.*pension|deutsche post ag|staatsoberkasse|renten.?service/i, sectionId:'deutsche_rente', typeId:'rente_brief', label:'Rente/Pension', needsReview:false },
   // ── Sonderausgaben ──
   { pattern: /kirchensteuer|kirchenbeitrag/i,                                                          sectionId:'kirche',          typeId:'kirchen_bescheid',          label:'Kirchensteuer',               needsReview:false },
   { pattern: /spende\b|caritas|rotes kreuz|unicef|greenpeace|diakonie|misereor|drk\b/i,               sectionId:'spenden',         typeId:'spenden_bescheinigung',     label:'Spende',                      needsReview:false },
@@ -2274,38 +2274,63 @@ function splitCsvLine(line, delim) {
   return cols;
 }
 
+// Parse any date string into YYYY-MM-DD (handles German DD.MM.YYYY, US MM/DD/YYYY, ISO YYYY-MM-DD)
+function parseAnyDate(s) {
+  s = s.trim();
+  // ISO: 2025-12-31
+  let m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s);
+  if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+  // German: 31.12.2025
+  m = /^(\d{1,2})\.(\d{1,2})\.(\d{4})$/.exec(s);
+  if (m) return `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`;
+  // US: 12/31/2025
+  m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(s);
+  if (m) return `${m[3]}-${m[1].padStart(2,'0')}-${m[2].padStart(2,'0')}`;
+  return '';
+}
+
+// Parse amount string (German 1.234,56 OR English 1234.56 / -1234.56)
+function parseAnyAmt(s) {
+  s = s.trim().replace(/\s/g,'');
+  if (!s || s === '-' || s === '+') return NaN;
+  // German: 1.234,56
+  if (/\d+\.\d{3},\d{2}$/.test(s)) return parseFloat(s.replace(/\./g,'').replace(',','.'));
+  // German no-thousands: 234,56
+  if (/^[+\-]?\d+,\d{2}$/.test(s)) return parseFloat(s.replace(',','.'));
+  // English: 1234.56 or -1234.56
+  if (/^[+\-]?\d+(\.\d+)?$/.test(s)) return parseFloat(s);
+  return NaN;
+}
+
 // Nuclear CSV fallback: scans every line for a date + an amount regardless of column structure
 function parseCsvNuclear(text) {
   const matched = [], all = [], seen = new Set();
-  const DATE_RE = /^(\d{2})\.(\d{2})\.(\d{4})$/;
-  const AMT_RE  = /^[+\-]?\d{1,3}(?:\.\d{3})*,\d{2}$/;
+  // Try both semicolon and comma as delimiter
+  const delim = text.indexOf(';') !== -1 ? ';' : ',';
   const lines = text.replace(/\r/g,'').split('\n');
   for (const raw of lines) {
-    const cols = raw.split(';').map(c => c.replace(/^"|"$/g,'').trim());
+    const cols = raw.split(delim).map(c => c.replace(/^"|"$/g,'').trim());
     if (cols.length < 3) continue;
-    // Find date
+    // Find first column that looks like a date
     let date = '';
     for (const c of cols) {
-      const m = DATE_RE.exec(c);
-      if (m) { date = `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`; break; }
+      const d = parseAnyDate(c);
+      if (d) { date = d; break; }
     }
     if (!date) continue;
-    // Find last amount-looking column
+    // Find last column that looks like a non-zero amount
     let amt = NaN;
     for (let ci = cols.length - 1; ci >= 0; ci--) {
-      if (!AMT_RE.test(cols[ci])) continue;
-      let as = cols[ci];
-      if (/\d+\.\d{3},\d{2}/.test(as))          as = as.replace(/\./g,'').replace(',','.');
-      else if (as.includes(',') && !as.includes('.')) as = as.replace(',','.');
-      else if (as.includes(',') && as.includes('.'))  as = as.replace(',','');
-      const v = parseFloat(as);
+      const v = parseAnyAmt(cols[ci]);
       if (!isNaN(v) && v !== 0) { amt = v; break; }
     }
     if (isNaN(amt) || amt === 0) continue;
     const key = `${date}|${amt}`;
     if (seen.has(key)) continue; seen.add(key);
     // Description from non-date, non-amount text columns
-    const desc = cols.filter(c => !DATE_RE.test(c) && !AMT_RE.test(c) && c.length > 1)
+    const isDateCol = c => !!parseAnyDate(c);
+    const isAmtCol  = c => !isNaN(parseAnyAmt(c)) && parseAnyAmt(c) !== 0;
+    const desc = cols.filter(c => !isDateCol(c) && !isAmtCol(c) && c.length > 1)
                      .join(' ').substring(0, 200);
     const name = desc.substring(0, 60);
     const fullT = desc.toLowerCase();
@@ -2337,14 +2362,15 @@ function parseCsv(text) {
   const allLines = text.replace(/\r/g,'').split('\n');
   if (allLines.length < 2) return { matched: [], all: [] };
 
-  // Deutsche Bank puts metadata rows at top — find the real header row
+  // Find the real header row (skip bank metadata at top)
   let headerIdx = -1, delim = ';';
   for (let i = 0; i < Math.min(allLines.length, 20); i++) {
     const l = allLines[i].toLowerCase();
-    if (/buchungstag|wertstellung|umsatzart|buchungstext/.test(l)) {
+    // German OR English header keywords
+    if (/buchungstag|wertstellung|umsatzart|buchungstext|booking.?date|transaction.?type|beneficiary/.test(l)) {
       headerIdx = i; delim = allLines[i].includes(';') ? ';' : ','; break;
     }
-    if (/datum|date|transaction/.test(l)) {
+    if (/datum\b|value.?date/.test(l)) {
       headerIdx = i; delim = allLines[i].includes(';') ? ';' : ','; break;
     }
   }
@@ -2358,11 +2384,12 @@ function parseCsv(text) {
 
   const header = lines[0].split(delim).map(h => h.replace(/^"|"$/g,'').trim().toLowerCase());
 
-  let dateCol = -1, amtCol = -1, nameCol = -1;
+  let dateCol = -1, amtCol = -1, nameCol = -1, descCol = -1;
   header.forEach((h, i) => {
-    if (/buchungstag|wertstellung|datum\b|^date$|buchungsdat/.test(h) && dateCol === -1) dateCol = i;
-    if (/betrag|amount|umsatzbetrag/.test(h)                          && amtCol  === -1) amtCol  = i;
-    if (/beg.nstigter|auftraggeber|payee|emp.nger|merchant|name/.test(h) && nameCol === -1) nameCol = i;
+    if (/buchungstag|booking.?date|datum\b|^date$|buchungsdat/.test(h) && dateCol === -1) dateCol = i;
+    if (/betrag|amount|umsatzbetrag/.test(h)                           && amtCol  === -1) amtCol  = i;
+    if (/beg.nstigter|auftraggeber|beneficiary|originator|payee|emp.nger|merchant/.test(h) && nameCol === -1) nameCol = i;
+    if (/verwendungszweck|payment.?detail|payment.?ref|reference|purpose|description|details/.test(h) && descCol === -1) descCol = i;
   });
   // Positional fallback
   if (dateCol === -1) dateCol = 0;
@@ -2397,33 +2424,25 @@ function parseCsv(text) {
     if (cols.length < 2) continue;
     const get = idx => idx >= 0 && idx < cols.length ? (cols[idx]||'').replace(/^"|"$/g,'').trim() : '';
 
-    // ── Amount ──
-    const amtRaw = get(amtCol).replace(/[^\d,.\-]/g,'').replace(/\s/g,'');
-    let amtStr = amtRaw;
-    if (/\d+\.\d{3},\d{2}/.test(amtStr))            amtStr = amtStr.replace(/\./g,'').replace(',','.');
-    else if (amtStr.includes(',') && !amtStr.includes('.')) amtStr = amtStr.replace(',','.');
-    else if (amtStr.includes(',') && amtStr.includes('.'))  amtStr = amtStr.replace(',','');
-    const amt = parseFloat(amtStr);
+    // ── Amount ── (handles German 1.234,56 AND English 1234.56)
+    const amt = parseAnyAmt(get(amtCol));
     if (isNaN(amt) || amt === 0) continue;
 
-    // ── Date ──
-    const dateRaw = get(dateCol);
-    let date = '';
-    const dm = dateRaw.match(/(\d{1,4})[.\-\/](\d{1,2})[.\-\/](\d{2,4})/);
-    if (dm) {
-      if (dm[1].length === 4) date = `${dm[1]}-${dm[2].padStart(2,'0')}-${dm[3].padStart(2,'0')}`;
-      else { const y = dm[3].length===2?'20'+dm[3]:dm[3]; date=`${y}-${dm[2].padStart(2,'0')}-${dm[1].padStart(2,'0')}`; }
-    }
+    // ── Date ── (handles German DD.MM.YYYY, US MM/DD/YYYY, ISO YYYY-MM-DD)
+    const date = parseAnyDate(get(dateCol));
+    if (!date) continue;
 
     // ── Name & Description ──
     const name = get(nameCol);
-    // Build desc from ALL non-skip, non-name text columns (catches Verwendungszweck + Anmerkungen)
+    const extraDesc = descCol >= 0 ? get(descCol) : '';
+    // Build desc from ALL non-skip, non-name text columns
     const descParts = cols
       .map((c, ci) => (skipCols.has(ci) || ci === nameCol) ? '' : c.replace(/^"|"$/g,'').trim())
       .filter(Boolean);
-    const desc = descParts.join(' ');
+    const desc = [name, extraDesc, ...descParts.filter(p => p !== name && p !== extraDesc)]
+      .filter(Boolean).join(' ').substring(0, 200);
 
-    // ── Search text: name + ALL relevant columns ──
+    // ── Search text: name + transaction type + description ──
     const fullText = `${name} ${desc}`.toLowerCase();
 
     // ── Detect property ──
