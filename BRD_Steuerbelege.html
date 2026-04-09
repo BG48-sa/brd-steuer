@@ -7,6 +7,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="BRD Steuer">
 <title>BRD Steuerbelege</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 
@@ -292,6 +293,20 @@ body {
 
 .spacer { height: 12px; }
 
+/* ─── IMPORT ─── */
+.import-source-btn {
+  flex: 1; padding: 12px 8px; border: 2px solid var(--gray4);
+  border-radius: 12px; background: var(--card); cursor: pointer;
+  font-family: inherit; font-size: 13px; font-weight: 600;
+  color: var(--label); text-align: center; transition: all .15s;
+}
+.import-source-btn.on { border-color: var(--blue); background: #EEF5FF; color: var(--blue); }
+.import-tx-row {
+  display: flex; align-items: flex-start; gap: 10px;
+  padding: 12px 16px; border-bottom: 0.5px solid var(--gray5);
+}
+.import-tx-row:last-child { border-bottom: none; }
+
 /* ─── CHIP BAR (Wohnungen sub-tabs) ─── */
 .chip-bar {
   display: flex; gap: 8px; padding: 10px 16px 6px;
@@ -352,6 +367,12 @@ body {
   <div id="export-content"></div>
 </div>
 
+<!-- ══════════ PAGE: IMPORT ══════════ -->
+<div class="page" id="p-import">
+  <div class="page-header"><h1>Bank-Import</h1></div>
+  <div id="import-content"></div>
+</div>
+
 <!-- ══════════ BOTTOM NAV ══════════ -->
 <nav class="nav-bar">
   <button class="nav-item active" id="nav-overview" onclick="goTab('overview')">
@@ -365,6 +386,10 @@ body {
   <button class="nav-item" id="nav-neu" onclick="goTab('neu')">
     <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11h-4v4h-2v-4H7v-2h4V7h2v4h4v2z"/></svg>
     <span>Neu</span>
+  </button>
+  <button class="nav-item" id="nav-import" onclick="goTab('import')">
+    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z"/></svg>
+    <span>Import</span>
   </button>
   <button class="nav-item" id="nav-export" onclick="goTab('export')">
     <svg viewBox="0 0 24 24" fill="currentColor"><path d="M9 17H7v-7h2v7zm4 0h-2V7h2v10zm4 0h-2v-4h2v4zm2.5 2.1h-15V5h15v14.1zm0-16.1h-15C3.35 3 3 3.45 3 4v16c0 .55.35 1 .5 1h15c.65 0 1.5-.45 1.5-1V4c0-.55-.85-1-1.5-1z"/></svg>
@@ -490,6 +515,18 @@ const SECTIONS = [
     types: [
       { id: 'tiaa',           name: 'TIAA Distribution',              anlage: 'Anlage AUS', tip: 'Form 1099-RSSA' },
       { id: 'social_security', name: 'Social Security Benefit Statement', anlage: 'Anlage AUS', tip: 'Form SSA-1099' }
+    ]
+  },
+  {
+    id: 'american_express',
+    name: 'American Express',
+    icon: '💳',
+    color: '#016FD0',
+    subsections: [],
+    types: [
+      { id: 'ae_jahresabrechnung',  name: 'Jahresabrechnung',          anlage: null,        tip: 'American Express Jahresabrechnung' },
+      { id: 'ae_steuerausgabe',     name: 'Steuerrelevante Ausgabe',   anlage: null,        tip: 'Steuerlich absetzbare Ausgaben mit American Express' },
+      { id: 'ae_bewirtung',         name: 'Bewirtungsbeleg',           anlage: 'Anlage S',  tip: 'Bewirtungskosten (70% absetzbar bei Selbständigkeit)' }
     ]
   },
   {
@@ -634,7 +671,7 @@ function toast(msg) {
 // ════════════════════════════════════════════
 
 function goTab(tab) {
-  ['overview','belege','neu','export'].forEach(t => {
+  ['overview','belege','neu','import','export'].forEach(t => {
     document.getElementById('p-' + t).classList.remove('active');
     document.getElementById('nav-' + t).classList.remove('active');
   });
@@ -645,6 +682,7 @@ function goTab(tab) {
   if (tab === 'overview') renderOverview();
   else if (tab === 'belege') { navStack = [{ view:'sections', params:{} }]; renderBelege(); }
   else if (tab === 'neu')    { pendingFiles = []; renderNeu(); }
+  else if (tab === 'import') renderImport();
   else if (tab === 'export') renderExport();
 }
 
@@ -692,6 +730,20 @@ function renderOverview() {
         const col  = wSt.res >= 0 ? 'var(--green)' : 'var(--red)';
         subLabel  = `${wTxCount} Buchung${wTxCount > 1 ? 'en' : ''} · <span style="color:${col};font-weight:600">${sign}${wEur(wSt.res)}</span>`;
         badgeHtml = `<span class="badge">${wTxCount}</span>`;
+      } else {
+        badgeHtml = `<span class="badge-0">0</span>`;
+      }
+    } else if (s.id === 'garagen') {
+      const garProps = PROPS_W.filter(p=>p.g);
+      const gTxs = wGetTxs().filter(t=>garProps.some(p=>p.id===t.pid)&&t.date.startsWith(currentYear+''));
+      if (gTxs.length > 0) {
+        const gInc = gTxs.filter(t=>t.type==='income').reduce((s,t)=>s+t.amt,0);
+        const gExp = gTxs.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amt,0);
+        const gRes = gInc - gExp;
+        const sign = gRes>=0?'+':'';
+        const col = gRes>=0?'var(--green)':'var(--red)';
+        subLabel = `${gTxs.length} Buchung${gTxs.length>1?'en':''} · <span style="color:${col};font-weight:600">${sign}${wEur(gRes)}</span>`;
+        badgeHtml = `<span class="badge">${gTxs.length}</span>`;
       } else {
         badgeHtml = `<span class="badge-0">0</span>`;
       }
@@ -762,7 +814,12 @@ function renderBelege() {
     if (top.params.sectionId === 'wohnungen') {
       const ab = document.createElement('button');
       ab.className = 'hdr-action'; ab.textContent = '+ Neu';
-      ab.onclick = () => { wInitForm(); bNav('w_new', {}); };
+      ab.onclick = () => { wCtx='wohnungen'; wInitForm(); bNav('w_new', {}); };
+      hdr.appendChild(h1); hdr.appendChild(ab);
+    } else if (top.params.sectionId === 'garagen') {
+      const ab = document.createElement('button');
+      ab.className = 'hdr-action'; ab.textContent = '+ Neu';
+      ab.onclick = () => { wCtx='garagen'; wInitForm(); bNav('w_new', {}); };
       hdr.appendChild(h1); hdr.appendChild(ab);
     } else {
       hdr.appendChild(h1);
@@ -816,6 +873,18 @@ function renderBSections() {
         subLabel  = `${wTxCount} Buchung${wTxCount > 1 ? 'en' : ''} · <span style="color:${col};font-weight:600">${sign}${wEur(wSt.res)}</span>`;
         badgeHtml = `<span class="badge">${wTxCount}</span>`;
       }
+    } else if (s.id === 'garagen') {
+      const garProps = PROPS_W.filter(p=>p.g);
+      const gTxs = wGetTxs().filter(t=>garProps.some(p=>p.id===t.pid)&&t.date.startsWith(currentYear+''));
+      if (gTxs.length > 0) {
+        const gInc = gTxs.filter(t=>t.type==='income').reduce((s,t)=>s+t.amt,0);
+        const gExp = gTxs.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amt,0);
+        const gRes = gInc - gExp;
+        const sign = gRes>=0?'+':'';
+        const col = gRes>=0?'var(--green)':'var(--red)';
+        subLabel = `${gTxs.length} Buchung${gTxs.length>1?'en':''} · <span style="color:${col};font-weight:600">${sign}${wEur(gRes)}</span>`;
+        badgeHtml = `<span class="badge">${gTxs.length}</span>`;
+      }
     } else {
       const cnt = docsBySection(s.id, currentYear).length;
       if (cnt > 0) {
@@ -844,6 +913,7 @@ function renderBSections() {
 // ─── Level 1: section → subsections + types ───
 function renderBSection(sectionId) {
   if (sectionId === 'wohnungen') { renderWohnungenSection(); return; }
+  if (sectionId === 'garagen') { renderGaragenSection(); return; }
   const s = SECTIONS.find(x => x.id === sectionId);
   if (!s) return;
   let html = '';
@@ -1486,11 +1556,14 @@ function findType(sectionId, typeId) {
 // ════════════════════════════════════════════
 
 const PROPS_W = [
-  { id:'elektra',        name:'Elektrastr.',        short:'Elektra',  color:'#007AFF' },
-  { id:'isartal_vgb',    name:'Isartalstr. VGB',    short:'Isar VGB', color:'#34C759' },
-  { id:'isartal_studio', name:'Isartalstr. Studio',  short:'Isar Std', color:'#FF9500' },
-  { id:'frundsberger',   name:'Frundsbergstr.',      short:'Frundsb.', color:'#AF52DE' },
-  { id:'rosenheimer',    name:'Rosenheimerstr.',     short:'Rosen.',   color:'#FF2D55' }
+  { id:'elektra',        name:'Elektrastr.',        short:'Elektra',  color:'#007AFF', g:false },
+  { id:'isartal_vgb',    name:'Isartalstr. VGB',    short:'Isar VGB', color:'#34C759', g:false },
+  { id:'isartal_studio', name:'Isartalstr. Studio',  short:'Isar Std', color:'#FF9500', g:false },
+  { id:'frundsberger',   name:'Frundsbergstr.',      short:'Frundsb.', color:'#AF52DE', g:false },
+  { id:'rosenheimer',    name:'Rosenheimerstr.',     short:'Rosen.',   color:'#FF2D55', g:false },
+  { id:'gar_sarnthein',  name:'Garage Sarnthein',   short:'G.Sarn.',  color:'#5856D6', g:true  },
+  { id:'gar_elektra',    name:'Garage Elektrastr.',  short:'G.Elek.',  color:'#32ADE6', g:true  },
+  { id:'gar_isartal',    name:'Garage Isartalstr.',  short:'G.Isar.',  color:'#30B0C7', g:true  },
 ];
 
 const W_CAT_INC = [
@@ -1521,6 +1594,7 @@ const W_MONTHS = ['Januar','Februar','März','April','Mai','Juni',
 // Wohnungen sub-tab state
 let wTab    = 'dash';   // 'dash' | 'txs' | 'tax'
 let wFilter = 'all';    // property filter for txs view
+let wCtx = 'wohnungen';  // 'wohnungen' | 'garagen'
 
 // Wohnungen form state (shared between new & edit)
 let WF = { editId:null, type:'income', prop:PROPS_W[0].id, cat:W_CAT_INC[0],
@@ -1578,6 +1652,168 @@ function renderWohnungenSection() {
 }
 
 function wSetTab(tab) { wTab = tab; if (tab==='txs') wFilter='all'; renderWohnungenSection(); }
+
+function renderGaragenSection() {
+  wCtx = 'garagen';
+  const garProps = PROPS_W.filter(p => p.g);
+  const yr = currentYear;
+
+  // Compute stats for garages only
+  const gAllStats = (y) => {
+    const txs = wGetTxs().filter(t => garProps.some(p=>p.id===t.pid) && t.date.startsWith(y+''));
+    const inc = txs.filter(t=>t.type==='income').reduce((s,t)=>s+t.amt,0);
+    const exp = txs.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amt,0);
+    return {inc,exp,res:inc-exp};
+  };
+
+  const chips = [
+    { id:'dash', label:'🚗 Übersicht' },
+    { id:'txs',  label:'📋 Buchungen' },
+    { id:'tax',  label:'📊 Anlage V'  }
+  ].map(c => `
+    <button class="chip${wTab===c.id?' on':''}"
+      style="${wTab===c.id?'background:var(--blue);color:white':''}"
+      onclick="gSetTab('${c.id}')">${c.label}</button>`).join('');
+
+  let html = `<div class="chip-bar" style="padding:10px 16px 6px;gap:8px">${chips}</div>`;
+
+  if (wTab === 'dash') {
+    const st = gAllStats(yr);
+    const sign = st.res>=0?'+':'';
+    html += `
+      <div class="hero-card" style="margin-top:12px">
+        <div class="hero-lbl">Garagen Ergebnis ${yr}</div>
+        <div class="hero-num" style="font-size:36px">${sign}${wEur(st.res)}</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px">
+          <div style="background:rgba(255,255,255,0.15);border-radius:12px;padding:10px 12px">
+            <div style="font-size:11px;opacity:.75">📈 Einnahmen</div>
+            <div style="font-size:18px;font-weight:700;margin-top:2px">${wEur(st.inc)}</div>
+          </div>
+          <div style="background:rgba(255,255,255,0.15);border-radius:12px;padding:10px 12px">
+            <div style="font-size:11px;opacity:.75">📉 Ausgaben</div>
+            <div style="font-size:18px;font-weight:700;margin-top:2px">${wEur(st.exp)}</div>
+          </div>
+        </div>
+      </div>
+      <div class="sec-hdr">Garagen</div>
+      <div class="card">`;
+    garProps.forEach(p => {
+      const ps = wPropStats(p.id, yr);
+      const rs = ps.res>=0?'+':'';
+      const col = ps.res>=0?'var(--green)':'var(--red)';
+      html += `<div class="list-row" onclick="gJumpToTxs('${p.id}')">
+        <div style="width:12px;height:12px;border-radius:50%;background:${p.color};flex-shrink:0"></div>
+        <div class="row-body">
+          <div class="row-title">${p.name}</div>
+          <div class="row-sub">+${wEur(ps.inc)} / −${wEur(ps.exp)}</div>
+        </div>
+        <div style="font-size:16px;font-weight:700;color:${col}">${rs}${wEur(ps.res)}</div>
+        <span class="chevron">›</span>
+      </div>`;
+    });
+    html += `</div>`;
+
+    const recent = wGetTxs().filter(t=>garProps.some(p=>p.id===t.pid)&&t.date.startsWith(yr+'')).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5);
+    if (recent.length > 0) {
+      html += `<div class="sec-hdr">Letzte Buchungen</div><div class="card">`;
+      recent.forEach(t => {
+        const p = wGetProp(t.pid);
+        const isInc = t.type==='income';
+        const col = isInc?'var(--green)':'var(--red)';
+        html += `<div class="doc-row" onclick="wEditTx('${t.id}')">
+          <div style="width:38px;height:38px;border-radius:11px;background:${p.color}20;display:flex;align-items:center;justify-content:center;font-size:19px;flex-shrink:0">${isInc?'💰':'📄'}</div>
+          <div class="doc-body">
+            <div class="doc-title">${esc(t.desc||t.cat)}</div>
+            <div class="doc-meta">${p.short} · ${wFmtDate(t.date)}</div>
+          </div>
+          <div style="font-size:15px;font-weight:600;color:${col};flex-shrink:0">${isInc?'+':'−'}${wEur(t.amt)}</div>
+        </div>`;
+      });
+      html += `</div>`;
+    }
+  } else if (wTab === 'txs') {
+    let txs = wGetTxs().filter(t=>garProps.some(p=>p.id===t.pid));
+    if (wFilter !== 'all') txs = txs.filter(t=>t.pid===wFilter);
+    txs = [...txs].sort((a,b)=>b.date.localeCompare(a.date));
+
+    let chips2 = `<button class="chip${wFilter==='all'?' on':''}" style="${wFilter==='all'?'background:var(--blue);color:white':''}" onclick="gSetFilter('all')">Alle</button>`;
+    garProps.forEach(p => {
+      const on = wFilter===p.id;
+      chips2 += `<button class="chip${on?' on':''}" style="${on?'background:'+p.color+';color:white':''}" onclick="gSetFilter('${p.id}')">${p.short}</button>`;
+    });
+    html += `<div class="chip-bar" style="padding:4px 16px 8px;gap:8px">${chips2}</div>`;
+
+    if (!txs.length) {
+      html += `<div class="empty"><div class="ico">📋</div><h3>Keine Buchungen</h3><p>Tippe oben auf „+ Neu" um die erste<br>Buchung zu erfassen.</p></div>`;
+    } else {
+      const groups = {};
+      txs.forEach(t => { const k=wMonthKey(t.date); if(!groups[k]) groups[k]=[]; groups[k].push(t); });
+      Object.keys(groups).sort((a,b)=>b.localeCompare(a)).forEach(k => {
+        const grp = groups[k];
+        const gInc = grp.filter(t=>t.type==='income').reduce((s,t)=>s+t.amt,0);
+        const gExp = grp.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amt,0);
+        html += `<div class="sec-hdr" style="padding-top:10px">${wMonthLabel(k)} &nbsp;·&nbsp; +${wEur(gInc)} / −${wEur(gExp)}</div><div class="card">`;
+        grp.forEach(t => {
+          const p = wGetProp(t.pid);
+          const isInc = t.type==='income';
+          const col = isInc?'var(--green)':'var(--red)';
+          html += `<div style="display:flex;align-items:center;border-bottom:0.5px solid var(--gray5)">
+            <div class="doc-row" onclick="wEditTx('${t.id}')" style="flex:1;border-bottom:none;padding-right:4px">
+              <div style="width:38px;height:38px;border-radius:11px;background:${p.color}20;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">${isInc?'💰':'📄'}</div>
+              <div class="doc-body">
+                <div class="doc-title">${esc(t.desc||t.cat)}</div>
+                <div class="doc-meta">${p.short} · ${t.cat}</div>
+              </div>
+              <div style="font-size:15px;font-weight:600;color:${col};flex-shrink:0">${isInc?'+':'−'}${wEur(t.amt)}</div>
+            </div>
+            <button onclick="wQuickDelete('${t.id}')" style="flex-shrink:0;padding:10px 14px;background:none;border:none;cursor:pointer;font-size:18px;color:var(--gray2)">🗑</button>
+          </div>`;
+        });
+        html += `</div>`;
+      });
+    }
+  } else if (wTab === 'tax') {
+    const st = gAllStats(yr);
+    const sign = st.res>=0?'+':'';
+    html += `
+      <div style="background:linear-gradient(135deg,#1C1C1E,#2C2C2E);color:white;border-radius:20px;margin:12px 16px 0;padding:18px 20px;box-shadow:0 4px 16px rgba(0,0,0,0.3)">
+        <div style="font-size:13px;opacity:.6">Steuerliches Ergebnis ${yr} · §21 EStG</div>
+        <div style="font-size:30px;font-weight:700;margin:3px 0 10px;letter-spacing:-.3px">${sign}${wEur(st.res)}</div>
+        <div style="font-size:13px;opacity:.75;display:flex;gap:16px"><span>📈 ${wEur(st.inc)}</span><span>📉 ${wEur(st.exp)}</span></div>
+      </div>`;
+    garProps.filter(p=>wPropStats(p.id,yr).n>0).forEach(p => {
+      const ps = wPropStats(p.id,yr);
+      const ebc = wExpByCat(p.id,yr);
+      const ibc = wIncByCat(p.id,yr);
+      const rs = ps.res>=0?'+':'';
+      const rBg = ps.res>=0?'#ECFDF5':'#FFF1F0';
+      const rCol = ps.res>=0?'var(--green)':'var(--red)';
+      html += `<div style="background:var(--card);border-radius:16px;margin:10px 16px 0;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.07)">
+        <div style="display:flex;align-items:center;gap:10px;padding:14px 16px 10px;border-bottom:.5px solid var(--gray5)">
+          <div style="width:12px;height:12px;border-radius:50%;background:${p.color}"></div>
+          <div style="font-size:16px;font-weight:700">${p.name}</div>
+        </div>`;
+      if(Object.keys(ibc).length) Object.entries(ibc).forEach(([c,a])=>{ html+=`<div style="display:flex;justify-content:space-between;padding:8px 16px;font-size:14px"><span style="color:var(--gray1)">${c}</span><span style="font-weight:500;color:var(--green)">${wEur(a)}</span></div>`; });
+      html += `<div style="display:flex;justify-content:space-between;padding:10px 16px;font-weight:700;font-size:15px;border-top:.5px solid var(--gray5)"><span>Summe Einnahmen</span><span style="color:var(--green)">${wEur(ps.inc)}</span></div>`;
+      if(Object.keys(ebc).length) Object.entries(ebc).forEach(([c,a])=>{ html+=`<div style="display:flex;justify-content:space-between;padding:8px 16px;font-size:14px"><span style="color:var(--gray1)">${c}</span><span style="font-weight:500;color:var(--red)">−${wEur(a)}</span></div>`; });
+      html += `<div style="display:flex;justify-content:space-between;padding:10px 16px;font-weight:700;font-size:15px;border-top:.5px solid var(--gray5)"><span>Summe Ausgaben</span><span style="color:var(--red)">−${wEur(ps.exp)}</span></div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin:10px 16px;border-radius:12px;padding:12px 16px;background:${rBg}">
+          <span style="font-size:14px;font-weight:600">Überschuss / Verlust</span>
+          <span style="font-size:20px;font-weight:700;color:${rCol}">${rs}${wEur(ps.res)}</span>
+        </div></div>`;
+    });
+    if (!garProps.some(p=>wPropStats(p.id,yr).n>0)) {
+      html += `<div class="empty"><div class="ico">📊</div><h3>Keine Daten für ${yr}</h3><p>Erfasse Buchungen um die<br>Steuerübersicht zu sehen.</p></div>`;
+    }
+  }
+
+  html += '<div class="spacer"></div>';
+  document.getElementById('belege-content').innerHTML = html;
+}
+
+function gSetTab(tab) { wTab = tab; if(tab==='txs') wFilter='all'; renderGaragenSection(); }
+function gSetFilter(f) { wFilter = f; renderGaragenSection(); }
+function gJumpToTxs(pid) { wFilter = pid; wTab='txs'; renderGaragenSection(); }
 
 // ─── Dashboard ───
 function wRenderDash() {
@@ -1774,7 +2010,8 @@ function wRenderTax() {
 
 // ─── New / Edit Form ───
 function wInitForm() {
-  WF = { editId:null, type:'income', prop:PROPS_W[0].id, cat:W_CAT_INC[0],
+  const firstProp = wCtx === 'garagen' ? PROPS_W.find(p=>p.g) : PROPS_W.find(p=>!p.g);
+  WF = { editId:null, type:'income', prop:firstProp?.id || PROPS_W[0].id, cat:W_CAT_INC[0],
          amt:'', date:wToday(), desc:'', inv:'', docFileId:null, docName:'' };
 }
 
@@ -1782,7 +2019,7 @@ function wReadDOM() {
   const a=document.getElementById('wf-amt'), d=document.getElementById('wf-date'),
         c=document.getElementById('wf-cat'), dc=document.getElementById('wf-desc'),
         iv=document.getElementById('wf-inv');
-  if(a) WF.amt=a.value; if(d) WF.date=d.value;
+  if(a) WF.amt = a.value.replace(',', '.'); if(d) WF.date=d.value;
   if(c) WF.cat=c.value; if(dc) WF.desc=dc.value; if(iv) WF.inv=iv.value;
 }
 
@@ -1803,13 +2040,14 @@ function renderWForm() {
 
     <div style="background:var(--card);border-radius:16px;margin:12px 16px 0;padding:16px;text-align:center;box-shadow:0 1px 4px rgba(0,0,0,.07)">
       <div style="font-size:13px;color:var(--gray1);margin-bottom:4px">Betrag in Euro</div>
-      <input type="number" inputmode="decimal" id="wf-amt" value="${WF.amt}" placeholder="0,00" step="0.01" min="0"
+      <input type="text" inputmode="decimal" id="wf-amt" value="${WF.amt}" placeholder="0,00"
         style="font-size:40px;font-weight:700;border:none;outline:none;width:100%;background:transparent;text-align:center;color:var(--label);font-family:inherit">
     </div>
 
     <div class="sec-hdr" style="padding-top:12px">Objekt</div>
-    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;padding:0 16px">`;
-  PROPS_W.forEach(p => {
+    <div style="display:grid;grid-template-columns:repeat(${wCtx==='garagen'?3:5},1fr);gap:8px;padding:0 16px">`;
+  const propsToShow = wCtx === 'garagen' ? PROPS_W.filter(p => p.g) : PROPS_W.filter(p => !p.g);
+  propsToShow.forEach(p => {
     h += `<button onclick="wSetProp('${p.id}')" style="display:flex;flex-direction:column;align-items:center;gap:5px;padding:9px 4px;border:2px solid ${WF.prop===p.id?p.color:'var(--gray5)'};border-radius:12px;background:${WF.prop===p.id?'#EEF5FF':'var(--card)'};cursor:pointer;font-size:8px;line-height:1.3;color:var(--label);text-align:center;font-family:inherit">
       <div style="width:12px;height:12px;border-radius:50%;background:${p.color}"></div>
       <span>${p.short}</span></button>`;
@@ -1867,7 +2105,7 @@ function renderWForm() {
 
 function wSaveTx() {
   wReadDOM();
-  const amt = parseFloat(WF.amt);
+  const amt = parseFloat(String(WF.amt).replace(',','.'));
   if (!amt || amt<=0) { toast('⚠️ Bitte gültigen Betrag eingeben'); return; }
   if (!WF.date)       { toast('⚠️ Bitte Datum wählen'); return; }
 
@@ -1912,6 +2150,8 @@ function wDeleteTx() {
 function wEditTx(id) {
   const t = wGetTxs().find(x=>x.id===id);
   if (!t) return;
+  const prop = PROPS_W.find(p=>p.id===t.pid);
+  wCtx = prop?.g ? 'garagen' : 'wohnungen';
   WF = { editId:id, type:t.type, prop:t.pid, cat:t.cat,
          amt:t.amt+'', date:t.date, desc:t.desc||'', inv:t.inv||'',
          docFileId:t.docFileId||null, docName:t.docName||'' };
@@ -1967,6 +2207,599 @@ function wDoExport() {
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(url);
   toast('📥 Export heruntergeladen');
+}
+
+// ════════════════════════════════════════════
+//  BANK-IMPORT
+// ════════════════════════════════════════════
+
+// ── Property name detection (from Deutsche Bank Verwendungszweck notes) ──
+const PROP_ALIASES = [
+  { pattern: /elektrastr(asse)?\.?\s*\d*|elektra\s+\d/i,          propId:'elektra',        propName:'Elektrastr.',       sectionId:'wohnungen', typeId:'wohnungen_allgemein' },
+  { pattern: /isartalstr(asse)?\.?\s*\d*|isartal\s+\d/i,          propId:'isartal_vgb',    propName:'Isartalstr.',       sectionId:'wohnungen', typeId:'wohnungen_allgemein' },
+  { pattern: /frundsbergstr(asse)?\.?|frundsberger\s+str/i,        propId:'frundsberger',   propName:'Frundsbergstr.',    sectionId:'wohnungen', typeId:'wohnungen_allgemein' },
+  { pattern: /rosenheimerstr(asse)?\.?|rosenheimer\s+str/i,        propId:'rosenheimer',    propName:'Rosenheimerstr.',   sectionId:'wohnungen', typeId:'wohnungen_allgemein' },
+  { pattern: /wohnung\s+sarnthein|sarnthein\s+whg|sarnthein\s+wohnung/i, propId:null,      propName:'Wohnung Sarnthein', sectionId:'wohnungen', typeId:'wohnung_sarnthein'  },
+  { pattern: /garage\s+sarnthein|sarnthein\s+garage/i,             propId:'gar_sarnthein',  propName:'Garage Sarnthein',  sectionId:'garagen',   typeId:'garage_sarnthein'   },
+  { pattern: /garage\s+elektra(str(asse)?)?|elektra(str(asse)?)?\s+garage/i,  propId:'gar_elektra', propName:'Garage Elektrastr.', sectionId:'garagen', typeId:'garage_elektrastrasse' },
+  { pattern: /garage\s+isartal(str(asse)?)?|isartal(str(asse)?)?\s+garage/i, propId:'gar_isartal', propName:'Garage Isartalstr.', sectionId:'garagen', typeId:'garage_isartalstrasse' },
+];
+
+const TAX_RULES = [
+  // ── Mieteinnahmen & Immobilien ── (confirmed tax relevant)
+  { pattern: /\bmiete\b|kaltmiete|mieteinnahme|miete\s+whg|miete\s+\d/i,                              sectionId:'wohnungen',       typeId:'wohnungen_allgemein',       label:'Mieteinnahme',                needsReview:false },
+  { pattern: /grundsteuer/i,                                                                            sectionId:'wohnungen',       typeId:'wohnungen_allgemein',       label:'Grundsteuer',                 needsReview:false },
+  { pattern: /hausverwaltung|hausgeld|wohnungseigent/i,                                                sectionId:'wohnungen',       typeId:'wohnungen_allgemein',       label:'Hausverwaltung',              needsReview:false },
+  { pattern: /reparatur|instandhaltung|handwerker|renovierung|sanit|elektriker/i,                      sectionId:'wohnungen',       typeId:'wohnungen_allgemein',       label:'Reparatur/Renovierung',       needsReview:false },
+  // ── Garagen ──
+  { pattern: /garage|stellplatz|tiefgarage|parkplatz|garagenstellplatz/i,                              sectionId:'garagen',         typeId:'garage_sarnthein',          label:'Garage/Stellplatz',           needsReview:false },
+  // ── Kapitalerträge ──
+  { pattern: /zinsen|dividenden|dividende|ertraege|ertrage|kapitalertrag|depot/i,                      sectionId:'deutsche_bank',   typeId:'jahressteuerbescheinigung', label:'Kapitalertrag/Zinsen',        needsReview:false },
+  // ── Versicherungen ──
+  { pattern: /krankenversicherung|krankenkasse|hallesche|aok\b|barmer|dak\b|ikk|bkk|pflegeversicherung/i, sectionId:'hallesche_kv', typeId:'hallesche_kv_brief',        label:'Kranken-/Pflegeversicherung', needsReview:false },
+  { pattern: /haftpflicht|hausratversicherung|geb.udeversicherung|rechtsschutz/i,                      sectionId:'sonstiges',       typeId:'sonstiges_allgemein',       label:'Versicherung',                needsReview:false },
+  { pattern: /rentenversicherung|drv\b|deutsche rentenversicherung|\bpension\b|\bversorgung\b|betriebsrente/i, sectionId:'deutsche_rente', typeId:'rente_brief', label:'Rente/Pension', needsReview:false },
+  // ── Sonderausgaben ──
+  { pattern: /kirchensteuer|kirchenbeitrag/i,                                                          sectionId:'kirche',          typeId:'kirchen_bescheid',          label:'Kirchensteuer',               needsReview:false },
+  { pattern: /spende\b|caritas|rotes kreuz|unicef|greenpeace|diakonie|misereor|drk\b/i,               sectionId:'spenden',         typeId:'spenden_bescheinigung',     label:'Spende',                      needsReview:false },
+  // ── Steuerberatung ──
+  { pattern: /steuerberatung|steuerberater|steuerburo|datev/i,                                        sectionId:'sonstiges',       typeId:'sonstiges_allgemein',       label:'Steuerberatung',              needsReview:false },
+  // ── American Express / Reise ──
+  { pattern: /american express|amex/i,                                                                 sectionId:'american_express',typeId:'ae_steuerausgabe',          label:'American Express',            needsReview:false },
+  { pattern: /hotel|flug|lufthansa|ryanair|eurowings|booking\.com|airbnb/i,                           sectionId:'american_express',typeId:'ae_steuerausgabe',          label:'Reisekosten',                 needsReview:false },
+  { pattern: /restaurant|bewirtung|gastst.tte|catering/i,                                             sectionId:'american_express',typeId:'ae_bewirtung',              label:'Bewirtung',                   needsReview:false },
+  // ── Renovierung / Möbel — BITTE PRÜFEN (nur relevant wenn für Mietwohnung) ──
+  { pattern: /\bikea\b/i,                                                                              sectionId:'wohnungen',       typeId:'wohnungen_allgemein',       label:'IKEA — Möbel/Einrichtung',    needsReview:true  },
+  { pattern: /\bobi\b|hornbach|bauhaus|toom\b|hagebau|hellweg/i,                                      sectionId:'wohnungen',       typeId:'wohnungen_allgemein',       label:'Baumarkt — Renovierung',      needsReview:true  },
+  { pattern: /roller\b|xxxlutz|m.bel\s*boss|poco\b|lipo\b|segm.ller/i,                               sectionId:'wohnungen',       typeId:'wohnungen_allgemein',       label:'Möbelhaus',                   needsReview:true  },
+  { pattern: /fliesen|parkett|laminat|tapete|farbe\b|lack\b|d.mmung/i,                                sectionId:'wohnungen',       typeId:'wohnungen_allgemein',       label:'Baumaterial — Renovierung',   needsReview:true  },
+  { pattern: /mediamarkt|saturn\b|expert\b/i,                                                         sectionId:'wohnungen',       typeId:'wohnungen_allgemein',       label:'Elektrogeräte',               needsReview:true  },
+];
+
+let importResults = [];
+let importSource  = 'db';    // 'db' = Deutsche Bank, 'ae' = American Express
+let importFormat  = 'pdf';   // 'pdf' | 'csv'
+
+function splitCsvLine(line, delim) {
+  const cols = []; let cur = '', inQ = false;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i];
+    if (c === '"') { inQ = !inQ; }
+    else if (c === delim && !inQ) { cols.push(cur); cur = ''; }
+    else cur += c;
+  }
+  cols.push(cur);
+  return cols;
+}
+
+function parseCsv(text) {
+  const allLines = text.replace(/\r/g,'').split('\n');
+  if (allLines.length < 2) return { matched: [], all: [] };
+
+  // Deutsche Bank puts metadata rows at top — find the real header row
+  let headerIdx = -1, delim = ';';
+  for (let i = 0; i < Math.min(allLines.length, 20); i++) {
+    const l = allLines[i].toLowerCase();
+    if (/buchungstag|wertstellung|umsatzart|buchungstext/.test(l)) {
+      headerIdx = i; delim = allLines[i].includes(';') ? ';' : ','; break;
+    }
+    if (/datum|date|transaction/.test(l)) {
+      headerIdx = i; delim = allLines[i].includes(';') ? ';' : ','; break;
+    }
+  }
+  if (headerIdx === -1) {
+    headerIdx = allLines.findIndex(l => l.trim().length > 0);
+    delim = allLines[headerIdx]?.includes(';') ? ';' : ',';
+  }
+
+  const lines = allLines.slice(headerIdx).filter(l => l.trim());
+  if (lines.length < 2) return { matched: [], all: [] };
+
+  const header = lines[0].split(delim).map(h => h.replace(/^"|"$/g,'').trim().toLowerCase());
+
+  let dateCol = -1, amtCol = -1, nameCol = -1;
+  header.forEach((h, i) => {
+    if (/buchungstag|datum\b|^date$/.test(h)                     && dateCol === -1) dateCol = i;
+    if (/betrag|amount/.test(h)                                   && amtCol  === -1) amtCol  = i;
+    if (/beg.nstigter|auftraggeber|payee|emp.nger|merchant/.test(h) && nameCol === -1) nameCol = i;
+  });
+  // Deutsche Bank positional fallback
+  if (dateCol === -1) dateCol = 0;
+  if (amtCol  === -1) amtCol  = header.length >= 7 ? 6 : -1;
+  if (nameCol === -1) nameCol = header.length >= 4 ? 3 : -1;
+
+  // Columns to SKIP when building search text (IBAN, BIC look like noise)
+  const skipCols = new Set();
+  header.forEach((h, i) => {
+    if (/iban|bic\b|blz|kontonummer|gl.ubiger|mandats|kunden.referenz/.test(h)) skipCols.add(i);
+  });
+  skipCols.add(dateCol);   // don't match dates as keywords
+  skipCols.add(amtCol);    // don't match amounts as keywords
+
+  const matched = [], all = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const cols = splitCsvLine(lines[i], delim);
+    if (cols.length < 2) continue;
+    const get = idx => idx >= 0 && idx < cols.length ? (cols[idx]||'').replace(/^"|"$/g,'').trim() : '';
+
+    // ── Amount ──
+    const amtRaw = get(amtCol).replace(/[^\d,.\-]/g,'').replace(/\s/g,'');
+    let amtStr = amtRaw;
+    if (/\d+\.\d{3},\d{2}/.test(amtStr))            amtStr = amtStr.replace(/\./g,'').replace(',','.');
+    else if (amtStr.includes(',') && !amtStr.includes('.')) amtStr = amtStr.replace(',','.');
+    else if (amtStr.includes(',') && amtStr.includes('.'))  amtStr = amtStr.replace(',','');
+    const amt = parseFloat(amtStr);
+    if (isNaN(amt) || amt === 0) continue;
+
+    // ── Date ──
+    const dateRaw = get(dateCol);
+    let date = '';
+    const dm = dateRaw.match(/(\d{1,4})[.\-\/](\d{1,2})[.\-\/](\d{2,4})/);
+    if (dm) {
+      if (dm[1].length === 4) date = `${dm[1]}-${dm[2].padStart(2,'0')}-${dm[3].padStart(2,'0')}`;
+      else { const y = dm[3].length===2?'20'+dm[3]:dm[3]; date=`${y}-${dm[2].padStart(2,'0')}-${dm[1].padStart(2,'0')}`; }
+    }
+
+    // ── Name & Description ──
+    const name = get(nameCol);
+    // Build desc from ALL non-skip, non-name text columns (catches Verwendungszweck + Anmerkungen)
+    const descParts = cols
+      .map((c, ci) => (skipCols.has(ci) || ci === nameCol) ? '' : c.replace(/^"|"$/g,'').trim())
+      .filter(Boolean);
+    const desc = descParts.join(' ');
+
+    // ── Search text: name + ALL relevant columns ──
+    const fullText = `${name} ${desc}`.toLowerCase();
+
+    // ── Detect property ──
+    let detectedProp = null;
+    for (const alias of PROP_ALIASES) {
+      if (alias.pattern.test(fullText)) { detectedProp = alias; break; }
+    }
+
+    // ── Apply TAX_RULES ──
+    let taxResult = null;
+    for (const rule of TAX_RULES) {
+      if (rule.pattern.test(fullText)) {
+        const sectionId = detectedProp ? detectedProp.sectionId : rule.sectionId;
+        const typeId    = detectedProp ? detectedProp.typeId    : rule.typeId;
+        const propNote  = detectedProp ? ` · ${detectedProp.propName}` : '';
+        taxResult = {
+          id: uid(), date, amt,
+          name: name || desc.substring(0,60), desc,
+          taxLabel: rule.label + propNote,
+          taxSectionId: sectionId, taxTypeId: typeId,
+          detectedPropName: detectedProp?.propName || null,
+          needsReview: rule.needsReview && !detectedProp,
+          accepted: true
+        };
+        break;
+      }
+    }
+
+    // Property name in notes but no keyword → still flag as relevant
+    if (!taxResult && detectedProp) {
+      taxResult = {
+        id: uid(), date, amt,
+        name: name || desc.substring(0,60), desc,
+        taxLabel: `${detectedProp.propName} — Transaktion`,
+        taxSectionId: detectedProp.sectionId, taxTypeId: detectedProp.typeId,
+        detectedPropName: detectedProp.propName,
+        needsReview: false, accepted: true
+      };
+    }
+
+    if (taxResult) {
+      matched.push(taxResult);
+    } else {
+      // Keep all transactions for manual review
+      all.push({
+        id: uid(), date, amt,
+        name: name || desc.substring(0,60), desc,
+        taxLabel: '—',
+        taxSectionId: 'sonstiges', taxTypeId: 'sonstiges_allgemein',
+        detectedPropName: null,
+        needsReview: false, accepted: false
+      });
+    }
+  }
+  return { matched, all };
+}
+
+function renderImport() {
+  const srcDB  = importSource==='db';
+  const srcAE  = importSource==='ae';
+  const isPdf  = importFormat==='pdf';
+  const isCsv  = importFormat==='csv';
+  const html = `
+    <div class="hero-card" style="padding:16px 20px">
+      <div class="hero-lbl">Steuerrelevante Transaktionen erkennen</div>
+      <div style="font-size:18px;font-weight:700;margin:4px 0">Kontoauszug importieren</div>
+      <div class="hero-sub">PDF oder CSV — App erkennt steuerrelevante Buchungen automatisch</div>
+    </div>
+
+    <div class="sec-hdr">Bank wählen</div>
+    <div style="display:flex;gap:10px;padding:0 16px">
+      <button class="import-source-btn${srcDB?' on':''}" onclick="setImportSource('db')">🏦 Deutsche Bank</button>
+      <button class="import-source-btn${srcAE?' on':''}" onclick="setImportSource('ae')">💳 American Express</button>
+    </div>
+
+    <div class="sec-hdr">Format wählen</div>
+    <div style="display:flex;gap:10px;padding:0 16px">
+      <button class="import-source-btn${isPdf?' on':''}" onclick="setImportFormat('pdf')" style="flex:1">
+        📄 PDF<br><span style="font-size:11px;font-weight:400;opacity:.8">Kontoauszug</span>
+      </button>
+      <button class="import-source-btn${isCsv?' on':''}" onclick="setImportFormat('csv')" style="flex:1">
+        📊 CSV<br><span style="font-size:11px;font-weight:400;opacity:.8">Zur Kontrolle</span>
+      </button>
+    </div>
+
+    <div style="margin:10px 16px 0;background:${isPdf?'#EEF5FF':'#F0FFF4'};border-radius:12px;padding:11px 14px;font-size:12px;color:var(--label2);line-height:1.6;border-left:4px solid ${isPdf?'var(--blue)':'var(--green)'}">
+      ${isPdf
+        ? `📄 <strong>PDF:</strong> Ihr Kontoauszug als PDF — enthält alle Buchungsdetails inkl. Ihrer eigenen Notizen (Verwendungszweck)<br><span style="color:var(--gray1)">Deutsche Bank: PDF-Kontoauszug aus dem Online-Banking herunterladen</span>`
+        : `📊 <strong>CSV:</strong> Maschinenlesbare Tabelle zur Kontrolle der PDF-Ergebnisse<br><span style="color:var(--gray1)">Deutsche Bank: Online-Banking → Umsätze → Exportieren → CSV</span>`
+      }
+    </div>
+
+    <div style="height:8px"></div>
+    <button class="attach-btn" onclick="document.getElementById('${isPdf?'pdf':'csv'}-import-input').click()">
+      ${isPdf ? '📄 PDF-Kontoauszug auswählen' : '📊 CSV-Datei auswählen'}
+    </button>
+    <input type="file" id="pdf-import-input" accept=".pdf" style="display:none" onchange="handlePdfImport(this)">
+    <input type="file" id="csv-import-input" accept=".csv,.txt" style="display:none" onchange="handleCsvImport(this)">
+
+    <div id="import-results"></div>
+    <div class="spacer"></div>`;
+  document.getElementById('import-content').innerHTML = html;
+  renderImportResults();
+}
+
+function setImportFormat(fmt) { importFormat = fmt; renderImport(); }
+
+function setImportSource(src) {
+  importSource = src;
+  renderImport();
+}
+
+function applyCsvResult(parsed) {
+  const { matched, all } = parsed;
+  if (matched.length > 0) {
+    // Auto-detected items go first (checked), then all others (unchecked) for manual review
+    importResults = [...matched, ...all];
+    toast(`✅ ${matched.length} steuerrelevant erkannt · ${all.length} weitere zum Durchblättern`);
+  } else if (all.length > 0) {
+    // Nothing auto-detected — show ALL so user can pick manually
+    importResults = all;
+    toast(`ℹ️ Keine automatische Erkennung — ${all.length} Buchungen zum manuellen Auswählen`);
+  } else {
+    importResults = [];
+    toast('⚠️ CSV konnte nicht gelesen werden — bitte Format prüfen');
+  }
+  renderImportResults();
+}
+
+function handleCsvImport(input) {
+  const file = input.files[0];
+  if (!file) return;
+  // Deutsche Bank exports ISO-8859-1; try that first, fall back to UTF-8
+  const encoding = importSource === 'db' ? 'iso-8859-1' : 'utf-8';
+  const reader = new FileReader();
+  reader.onload = e => {
+    try {
+      const result1 = parseCsv(e.target.result);
+      if (result1.matched.length === 0 && result1.all.length === 0) {
+        // Retry with opposite encoding
+        const r2 = new FileReader();
+        r2.onload = e2 => {
+          try { applyCsvResult(parseCsv(e2.target.result)); }
+          catch(err) { toast('⚠️ Fehler beim Lesen der CSV-Datei'); }
+        };
+        r2.readAsText(file, encoding === 'iso-8859-1' ? 'utf-8' : 'iso-8859-1');
+      } else {
+        applyCsvResult(result1);
+      }
+    } catch(err) {
+      toast('⚠️ Fehler beim Lesen der CSV-Datei');
+    }
+  };
+  reader.readAsText(file, encoding);
+  input.value = '';
+}
+
+/* ─── PDF IMPORT ─── */
+async function handlePdfImport(input) {
+  const file = input.files[0];
+  if (!file) return;
+  input.value = '';
+  toast('📄 PDF wird gelesen …');
+  try {
+    const arrayBuffer = await file.arrayBuffer();
+    // Configure PDF.js worker
+    if (window.pdfjsLib) {
+      pdfjsLib.GlobalWorkerOptions.workerSrc =
+        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+      const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+      let fullText = '';
+      for (let p = 1; p <= pdf.numPages; p++) {
+        const page = await pdf.getPage(p);
+        const content = await page.getTextContent();
+        // Group items by Y position (threshold 6px to handle DB's split DD.MM. / YYYY layout)
+        let lastY = null;
+        for (const item of content.items) {
+          if (lastY !== null && Math.abs(item.transform[5] - lastY) > 6) {
+            fullText += '\n';
+          }
+          fullText += item.str + ' ';
+          lastY = item.transform[5];
+        }
+        fullText += '\n';
+      }
+      importResults = parsePdfBank(fullText);
+      if (importResults.length === 0) {
+        toast('⚠️ Keine steuerrelevanten Buchungen gefunden');
+      } else {
+        toast(`✅ ${importResults.length} steuerrelevante Buchungen gefunden`);
+      }
+      renderImportResults();
+    } else {
+      toast('⚠️ PDF-Bibliothek nicht geladen – bitte online öffnen');
+    }
+  } catch (err) {
+    console.error('PDF import error:', err);
+    toast('⚠️ Fehler beim Lesen der PDF-Datei');
+  }
+}
+
+function parsePdfBank(text) {
+  // Deutsche Bank PDF structure (confirmed from real PDF analysis):
+  // - Dates appear as "01.04." on one Y-row, "2025" on the next
+  // - SEPA transaction types ("SEPA Überweisung von", "SEPA Dauerauftrag an" etc.)
+  //   are the ONLY reliable transaction boundary markers
+  // - Payee name is on the line RIGHT AFTER the SEPA marker
+  // - "Verwendungszweck/ Kundenreferenz" precedes the purpose/description line
+  // - Amounts appear separately (right column) — not always adjacent to descriptions
+
+  const txs = [];
+  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
+
+  // Transaction type markers — DB uses these exact phrases
+  const TX_RE = /^(SEPA\s+(?:Überweisung|Dauerauftrag|Lastschrift(?:einzug)?|Gutschrift|Einlastschrift)\s+(?:von|an)|ZINSEN\/DIVIDENDEN|Wertpapier(?:kauf|verkauf)|Kartenabrechnung|Barauszahlung|Scheckeinreichung)/i;
+
+  // Track the most recent date seen as we scan
+  let lastDate = `${currentYear}-01-01`;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // Update running date: "DD.MM." optionally followed by "YYYY" on next line
+    const partialDate = /^(\d{2})\.(\d{2})\.\s*(\d{4})?$/.exec(line);
+    if (partialDate) {
+      const d = partialDate[1], mo = partialDate[2];
+      let yr = partialDate[3];
+      if (!yr) {
+        // Year on next line?
+        const nextL = lines[i + 1] || '';
+        yr = /^\d{4}$/.test(nextL.trim()) ? nextL.trim() : String(currentYear);
+      }
+      lastDate = `${yr}-${mo}-${d}`;
+      continue;
+    }
+    // Full date in header "01.04.2025" → update running date
+    const fullDate = /\b(\d{2})\.(\d{2})\.(\d{4})\b/.exec(line);
+    if (fullDate && !/kontoauszug vom|bis |inhaber/i.test(line)) {
+      lastDate = `${fullDate[3]}-${fullDate[2]}-${fullDate[1]}`;
+    }
+
+    // ── Only continue for SEPA transaction lines ──
+    if (!TX_RE.test(line)) continue;
+
+    const txType = line.trim(); // e.g. "SEPA Überweisung von"
+
+    // ── Collect the block: this line + following lines until next SEPA marker ──
+    const blockLines = [line];
+    let vzweck = '';
+    let nextVZ = false;
+    for (let j = i + 1; j < lines.length && j <= i + 12; j++) {
+      const nl = lines[j];
+      if (!nl || nl.length < 2) continue;
+      if (TX_RE.test(nl)) break; // next transaction starts
+      // Detect "Verwendungszweck/ Kundenreferenz" → next line is the purpose
+      if (/^Verwendungszweck\//i.test(nl)) { nextVZ = true; continue; }
+      if (nextVZ) { vzweck = nl; nextVZ = false; }
+      blockLines.push(nl);
+    }
+
+    // ── Extract payee name ──
+    // First non-IBAN/BIC/reference line after the SEPA marker
+    let payee = '';
+    for (let j = 1; j < blockLines.length; j++) {
+      const bl = blockLines[j];
+      if (!bl || bl.length < 2)                                   continue;
+      if (/^DE\d{2}[\s\d]/.test(bl))                             continue; // IBAN
+      if (/^[A-Z]{4}[A-Z0-9]{2}[A-Z0-9]{2,5}$/.test(bl))        continue; // BIC
+      if (/^(IBAN|BIC|Gläubiger|Mand|RINP|RCUR|FRST|OOFF)/i.test(bl)) continue;
+      if (/^[\d\s\.,\+\-\/]+$/.test(bl))                         continue; // only numbers
+      payee = bl.replace(/\b\d{1,3}(?:\.\d{3})*,\d{2}\b/g, '').trim();
+      if (payee.length >= 2) break;
+    }
+    if (!payee) payee = txType; // fallback to type text
+
+    // ── Find amount ── look in a window of ±5 lines around this block
+    const AMT_RE = /^([+\-])\s*(\d{1,3}(?:\.\d{3})*,\d{2})$/;
+    let amt = 0;
+    // Search FORWARD first (most common: amount after description in PDF.js output)
+    for (let k = i; k <= Math.min(lines.length - 1, i + 15); k++) {
+      const m = AMT_RE.exec(lines[k]);
+      if (m) { amt = parseFloat((m[1]+m[2]).replace(/\./g,'').replace(',','.')); break; }
+    }
+    // If not found forward, search backward (Haben amounts appear before descriptions)
+    if (!amt) {
+      for (let k = i - 1; k >= Math.max(0, i - 10); k--) {
+        const m = AMT_RE.exec(lines[k]);
+        if (m) { amt = parseFloat((m[1]+m[2]).replace(/\./g,'').replace(',','.')); break; }
+      }
+    }
+    // Last resort: any number in block
+    if (!amt) {
+      const anyAmt = [...blockLines.join(' ').matchAll(/([+\-]?\s*\d{1,3}(?:\.\d{3})*,\d{2})/g)];
+      if (anyAmt.length > 0) {
+        amt = parseFloat(anyAmt[0][1].replace(/\s/g,'').replace(/\./g,'').replace(',','.'));
+      }
+    }
+
+    // ── Build search text for TAX_RULES + PROP_ALIASES ──
+    const fullBlock = [...blockLines, vzweck].join(' ');
+    const name = payee.substring(0, 80);
+    const desc = `${txType} · ${payee}${vzweck ? ' · ' + vzweck : ''}`.substring(0, 200);
+
+    // Detect property
+    let detectedProp = null;
+    for (const alias of PROP_ALIASES) {
+      if (alias.pattern.test(fullBlock)) { detectedProp = alias; break; }
+    }
+
+    // Apply TAX_RULES
+    let matched = false;
+    for (const rule of TAX_RULES) {
+      if (rule.pattern.test(fullBlock)) {
+        const sId = detectedProp ? detectedProp.sectionId : rule.sectionId;
+        const tId = detectedProp ? detectedProp.typeId    : rule.typeId;
+        txs.push({
+          id: uid(), date: lastDate, name, desc, amt,
+          taxLabel:     rule.label + (detectedProp ? ` · ${detectedProp.propName}` : ''),
+          taxSectionId: sId, taxTypeId: tId,
+          detectedPropName: detectedProp?.propName || null,
+          needsReview:  rule.needsReview && !detectedProp,
+          accepted: true
+        });
+        matched = true;
+        break;
+      }
+    }
+    if (!matched && detectedProp) {
+      txs.push({
+        id: uid(), date: lastDate, name, desc, amt,
+        taxLabel:     `${detectedProp.propName} — Transaktion`,
+        taxSectionId: detectedProp.sectionId, taxTypeId: detectedProp.typeId,
+        detectedPropName: detectedProp.propName,
+        needsReview: false, accepted: true
+      });
+    }
+  }
+
+  // Deduplicate
+  const seen = new Set();
+  return txs.filter(t => {
+    const key = `${t.date}|${t.name}|${t.amt}`;
+    if (seen.has(key)) return false;
+    seen.add(key); return true;
+  });
+}
+
+function renderImportResults() {
+  const el = document.getElementById('import-results');
+  if (!el) return;
+  if (importResults.length === 0) { el.innerHTML = ''; return; }
+
+  const eurFmt    = n => new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR'}).format(n);
+  const autoItems = importResults.filter(t => t.accepted);
+  const manItems  = importResults.filter(t => !t.accepted);
+  const reviewCnt = autoItems.filter(t => t.needsReview).length;
+  const saveCnt   = importResults.filter(t => t.accepted).length;
+
+  const rowHtml = (t, i, isManual) => {
+    const amtColor = t.amt >= 0 ? 'var(--green)' : 'var(--red)';
+    const sign     = t.amt >= 0 ? '+' : '';
+    const dateStr  = t.date ? t.date.split('-').reverse().join('.') : '–';
+    const labelCol = t.needsReview ? '#FF9500' : (isManual ? 'var(--gray1)' : 'var(--blue)');
+    const rowBg    = t.needsReview ? 'background:#FFFBF0;' : (isManual ? 'background:#F9F9F9;' : '');
+    return `
+      <div class="import-tx-row" style="${rowBg}">
+        <input type="checkbox" ${t.accepted?'checked':''} onchange="toggleImport(${i},this.checked)"
+          style="width:20px;height:20px;margin-top:3px;flex-shrink:0;cursor:pointer;accent-color:var(--blue)">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:14px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(t.name)}</div>
+          <div style="font-size:12px;color:var(--gray1);margin-top:2px">${dateStr}${t.taxLabel!=='—'?` · <span style="color:${labelCol};font-weight:600">${t.needsReview?'⚠️ ':''}${t.taxLabel}</span>`:''}</div>
+          ${t.desc && t.desc !== t.name ? `<div style="font-size:11px;color:var(--gray2);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(t.desc.substring(0,80))}</div>`:''}
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px;flex-shrink:0;margin-left:8px">
+          <div style="font-size:14px;font-weight:700;color:${amtColor}">${sign}${eurFmt(t.amt)}</div>
+          <button onclick="removeImportItem(${i})" style="background:none;border:none;font-size:11px;color:var(--gray2);cursor:pointer;padding:0">✕</button>
+        </div>
+      </div>`;
+  };
+
+  let html = `
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px 4px">
+      <div style="font-size:12px;font-weight:600;text-transform:uppercase;letter-spacing:.6px;color:var(--gray1)">
+        ${autoItems.length} erkannt · ${manItems.length} weitere
+      </div>
+      <button onclick="clearImportResults()" style="background:none;border:none;font-size:13px;color:var(--red);font-weight:600;padding:4px 8px;cursor:pointer">✕ Alle löschen</button>
+    </div>`;
+
+  if (reviewCnt > 0) {
+    html += `<div style="margin:0 16px 8px;background:#FFF8E1;border-radius:10px;padding:10px 12px;font-size:12px;color:#856404;border-left:4px solid #FFC107">
+      ⚠️ <strong>Bitte prüfen:</strong> Nur anhaken wenn wirklich für eine vermietete Wohnung/Garage.
+    </div>`;
+  }
+
+  if (autoItems.length > 0) {
+    html += `<div class="sec-hdr" style="padding-top:4px">✅ Automatisch erkannt</div><div class="card">`;
+    autoItems.forEach((t) => { const i = importResults.indexOf(t); html += rowHtml(t, i, false); });
+    html += `</div>`;
+  }
+
+  if (manItems.length > 0) {
+    html += `<div class="sec-hdr" style="padding-top:8px">📋 Alle Buchungen — manuell auswählen</div>
+    <div style="margin:0 16px 8px;background:#EEF5FF;border-radius:10px;padding:9px 12px;font-size:12px;color:#1D4ED8">
+      Haken setzen bei Buchungen die steuerrelevant sind
+    </div>
+    <div class="card">`;
+    manItems.forEach((t) => { const i = importResults.indexOf(t); html += rowHtml(t, i, true); });
+    html += `</div>`;
+  }
+
+  html += `<button class="save-btn" id="import-save-btn" style="margin-top:12px" onclick="saveImportedTxs()">
+    💾 ${saveCnt} Belege speichern
+  </button>`;
+  el.innerHTML = html;
+}
+
+function toggleImport(idx, checked) {
+  if (importResults[idx]) importResults[idx].accepted = checked;
+  // Update save button count without full re-render
+  const btn = document.getElementById('import-save-btn');
+  if (btn) btn.textContent = `💾 ${importResults.filter(t=>t.accepted).length} Belege speichern`;
+}
+
+function removeImportItem(idx) {
+  importResults.splice(idx, 1);
+  renderImportResults();
+}
+
+function clearImportResults() {
+  importResults = [];
+  renderImportResults();
+}
+
+function saveImportedTxs() {
+  const toSave = importResults.filter(t => t.accepted);
+  if (!toSave.length) { toast('⚠️ Keine Buchungen ausgewählt'); return; }
+  const eurFmt = n => new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR'}).format(n);
+  toSave.forEach(t => {
+    const dateStr = t.date ? t.date.split('-').reverse().join('.') : '–';
+    addDoc({
+      id: uid(), year: currentYear,
+      sectionId: t.taxSectionId, subsectionId: null, typeId: t.taxTypeId,
+      title: `${t.name} – ${dateStr}`,
+      notes: `${t.taxLabel} · ${t.amt>=0?'+':''}${eurFmt(t.amt)}${t.desc&&t.desc!==t.name?'\n'+t.desc:''}`,
+      files: [], createdAt: Date.now(), modifiedAt: Date.now()
+    });
+  });
+  importResults = [];
+  toast(`✅ ${toSave.length} Belege gespeichert`);
+  setTimeout(() => goTab('overview'), 800);
 }
 
 // ════════════════════════════════════════════
