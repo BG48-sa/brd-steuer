@@ -2264,12 +2264,73 @@ function splitCsvLine(line, delim) {
   const cols = []; let cur = '', inQ = false;
   for (let i = 0; i < line.length; i++) {
     const c = line[i];
-    if (c === '"') { inQ = !inQ; }
-    else if (c === delim && !inQ) { cols.push(cur); cur = ''; }
+    if (c === '"') {
+      if (inQ && line[i+1] === '"') { cur += '"'; i++; } // "" = escaped quote inside field
+      else inQ = !inQ;
+    } else if (c === delim && !inQ) { cols.push(cur); cur = ''; }
     else cur += c;
   }
   cols.push(cur);
   return cols;
+}
+
+// Nuclear CSV fallback: scans every line for a date + an amount regardless of column structure
+function parseCsvNuclear(text) {
+  const matched = [], all = [], seen = new Set();
+  const DATE_RE = /^(\d{2})\.(\d{2})\.(\d{4})$/;
+  const AMT_RE  = /^[+\-]?\d{1,3}(?:\.\d{3})*,\d{2}$/;
+  const lines = text.replace(/\r/g,'').split('\n');
+  for (const raw of lines) {
+    const cols = raw.split(';').map(c => c.replace(/^"|"$/g,'').trim());
+    if (cols.length < 3) continue;
+    // Find date
+    let date = '';
+    for (const c of cols) {
+      const m = DATE_RE.exec(c);
+      if (m) { date = `${m[3]}-${m[2].padStart(2,'0')}-${m[1].padStart(2,'0')}`; break; }
+    }
+    if (!date) continue;
+    // Find last amount-looking column
+    let amt = NaN;
+    for (let ci = cols.length - 1; ci >= 0; ci--) {
+      if (!AMT_RE.test(cols[ci])) continue;
+      let as = cols[ci];
+      if (/\d+\.\d{3},\d{2}/.test(as))          as = as.replace(/\./g,'').replace(',','.');
+      else if (as.includes(',') && !as.includes('.')) as = as.replace(',','.');
+      else if (as.includes(',') && as.includes('.'))  as = as.replace(',','');
+      const v = parseFloat(as);
+      if (!isNaN(v) && v !== 0) { amt = v; break; }
+    }
+    if (isNaN(amt) || amt === 0) continue;
+    const key = `${date}|${amt}`;
+    if (seen.has(key)) continue; seen.add(key);
+    // Description from non-date, non-amount text columns
+    const desc = cols.filter(c => !DATE_RE.test(c) && !AMT_RE.test(c) && c.length > 1)
+                     .join(' ').substring(0, 200);
+    const name = desc.substring(0, 60);
+    const fullT = desc.toLowerCase();
+    let detectedProp = null;
+    for (const alias of PROP_ALIASES) { if (alias.pattern.test(fullT)) { detectedProp = alias; break; } }
+    let taxResult = null;
+    for (const rule of TAX_RULES) {
+      if (rule.pattern.test(fullT)) {
+        taxResult = {
+          id: uid(), date, amt, name, desc,
+          taxLabel: rule.label + (detectedProp ? ` · ${detectedProp.propName}` : ''),
+          taxSectionId: detectedProp ? detectedProp.sectionId : rule.sectionId,
+          taxTypeId:    detectedProp ? detectedProp.typeId    : rule.typeId,
+          detectedPropName: detectedProp?.propName || null,
+          needsReview: rule.needsReview && !detectedProp, accepted: true
+        };
+        break;
+      }
+    }
+    if (taxResult) matched.push(taxResult);
+    else all.push({ id: uid(), date, amt, name, desc, taxLabel: '—',
+      taxSectionId: 'sonstiges', taxTypeId: 'sonstiges_allgemein',
+      detectedPropName: null, needsReview: false, accepted: false });
+  }
+  return { matched, all };
 }
 
 function parseCsv(text) {
@@ -2495,17 +2556,21 @@ function applyCsvResult(parsed) {
 function handleCsvImport(input) {
   const file = input.files[0];
   if (!file) return;
-  // Deutsche Bank exports ISO-8859-1; try that first, fall back to UTF-8
   const encoding = importSource === 'db' ? 'iso-8859-1' : 'utf-8';
+  const tryParse = txt => {
+    let r = parseCsv(txt);
+    if (r.matched.length === 0 && r.all.length === 0) r = parseCsvNuclear(txt);
+    return r;
+  };
   const reader = new FileReader();
   reader.onload = e => {
     try {
-      const result1 = parseCsv(e.target.result);
+      const result1 = tryParse(e.target.result);
       if (result1.matched.length === 0 && result1.all.length === 0) {
         // Retry with opposite encoding
         const r2 = new FileReader();
         r2.onload = e2 => {
-          try { applyCsvResult(parseCsv(e2.target.result)); }
+          try { applyCsvResult(tryParse(e2.target.result)); }
           catch(err) { toast('⚠️ Fehler beim Lesen der CSV-Datei'); }
         };
         r2.readAsText(file, encoding === 'iso-8859-1' ? 'utf-8' : 'iso-8859-1');
@@ -2671,6 +2736,10 @@ function parsePdfBank(text) {
         amt = parseFloat(anyAmt[0][1].replace(/\s/g,'').replace(/\./g,'').replace(',','.'));
       }
     }
+
+    // ZINSEN/DIVIDENDEN entries with negative amounts are Kapitalertragsteuer/Soli
+    // deductions — NOT income. Skip them so only the net credit (+) is imported.
+    if (/ZINSEN|DIVIDENDEN/i.test(txType) && amt < 0) continue;
 
     // ── Build search text for TAX_RULES + PROP_ALIASES ──
     const fullBlock = [...blockLines, vzweck].join(' ');
