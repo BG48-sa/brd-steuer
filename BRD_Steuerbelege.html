@@ -392,7 +392,8 @@ const SECTIONS = [
     color: '#007AFF',
     subsections: [],
     types: [
-      { id: 'wohnungen_allgemein', name: 'Mietunterlagen / Allgemein', anlage: 'Anlage V', tip: 'Belege zu Einnahmen und Ausgaben aus Vermietung und Verpachtung' }
+      { id: 'wohnungen_allgemein', name: 'Mietunterlagen / Allgemein', anlage: 'Anlage V', tip: 'Belege zu Einnahmen und Ausgaben aus Vermietung und Verpachtung' },
+      { id: 'wohnung_sarnthein', name: 'Wohnung Sarnthein', anlage: 'Anlage V', tip: 'Belege zur Wohnung Sarnthein' }
     ]
   },
   {
@@ -489,6 +490,28 @@ const SECTIONS = [
     types: [
       { id: 'tiaa',           name: 'TIAA Distribution',              anlage: 'Anlage AUS', tip: 'Form 1099-RSSA' },
       { id: 'social_security', name: 'Social Security Benefit Statement', anlage: 'Anlage AUS', tip: 'Form SSA-1099' }
+    ]
+  },
+  {
+    id: 'garagen',
+    name: 'Garagen',
+    icon: '🚗',
+    color: '#636366',
+    subsections: [],
+    types: [
+      { id: 'garage_sarnthein',     name: 'Garage Sarnthein',     anlage: 'Anlage V', tip: 'Belege zur Garage Sarnthein' },
+      { id: 'garage_elektrastrasse', name: 'Garage Elektrastrasse', anlage: 'Anlage V', tip: 'Belege zur Garage Elektrastrasse' },
+      { id: 'garage_isartalstrasse', name: 'Garage Isartalstrasse', anlage: 'Anlage V', tip: 'Belege zur Garage Isartalstrasse' }
+    ]
+  },
+  {
+    id: 'sonstiges',
+    name: 'Sonstiges',
+    icon: '📂',
+    color: '#8E8E93',
+    subsections: [],
+    types: [
+      { id: 'sonstiges_allgemein', name: 'Sonstiger Beleg', anlage: null, tip: 'Dokumente die noch keiner Kategorie zugeordnet sind' }
     ]
   }
 ];
