@@ -2227,9 +2227,9 @@ const PROP_ALIASES = [
 
 const TAX_RULES = [
   // ── Mieteinnahmen & Immobilien ── (confirmed tax relevant)
-  { pattern: /\bmiete\b|kaltmiete|mieteinnahme|miete\s+whg|miete\s+\d/i,                              sectionId:'wohnungen',       typeId:'wohnungen_allgemein',       label:'Mieteinnahme',                needsReview:false },
+  { pattern: /\bmiete\b|kaltmiete|mieteinnahme|miete\s+whg|miete\s+\d|miete\s+[a-z]/i,              sectionId:'wohnungen',       typeId:'wohnungen_allgemein',       label:'Mieteinnahme',                needsReview:false },
   { pattern: /grundsteuer/i,                                                                            sectionId:'wohnungen',       typeId:'wohnungen_allgemein',       label:'Grundsteuer',                 needsReview:false },
-  { pattern: /hausverwaltung|hausgeld|wohnungseigent/i,                                                sectionId:'wohnungen',       typeId:'wohnungen_allgemein',       label:'Hausverwaltung',              needsReview:false },
+  { pattern: /hausverwaltung|hausgeld|wohnungseigent|monatsgeld|wohnlast|hausgeld|weg\b/i,           sectionId:'wohnungen',       typeId:'wohnungen_allgemein',       label:'Hausverwaltung',              needsReview:false },
   { pattern: /reparatur|instandhaltung|handwerker|renovierung|sanit|elektriker/i,                      sectionId:'wohnungen',       typeId:'wohnungen_allgemein',       label:'Reparatur/Renovierung',       needsReview:false },
   // ── Garagen ──
   { pattern: /garage|stellplatz|tiefgarage|parkplatz|garagenstellplatz/i,                              sectionId:'garagen',         typeId:'garage_sarnthein',          label:'Garage/Stellplatz',           needsReview:false },
@@ -2641,8 +2641,12 @@ function parsePdfBank(text) {
   const txs = [];
   const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
 
-  // Transaction type markers — DB uses these exact phrases
-  const TX_RE = /^(SEPA\s+(?:Überweisung|Dauerauftrag|Lastschrift(?:einzug)?|Gutschrift|Einlastschrift)\s+(?:von|an)|ZINSEN\/DIVIDENDEN|Wertpapier(?:kauf|verkauf)|Kartenabrechnung|Barauszahlung|Scheckeinreichung)/i;
+  // TX_RE matches the transaction type keyword anywhere in a line.
+  // In DB PDFs, PDF.js groups the Buchung date, Valuta date, SEPA type and amount
+  // all on ONE Y-row, so lines often look like:
+  //   "03.01. 03.01. SEPA Dauerauftrag an - 255,71"
+  // TX_RE must NOT have ^ anchor so it matches mid-line too.
+  const TX_RE = /(SEPA\s+(?:Überweisung|Dauerauftrag|Lastschrift(?:einzug)?|Gutschrift|Einlastschrift)\s+(?:von|an)|ZINSEN\/DIVIDENDEN(?:\/\S+)?|Wertpapier(?:kauf|verkauf)|Kartenabrechnung|Barauszahlung|Scheckeinreichung)/i;
 
   // Track the most recent date seen as we scan
   let lastDate = `${currentYear}-01-01`;
@@ -2650,38 +2654,46 @@ function parsePdfBank(text) {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
-    // Update running date: "DD.MM." optionally followed by "YYYY" on next line
-    const partialDate = /^(\d{2})\.(\d{2})\.\s*(\d{4})?$/.exec(line);
-    if (partialDate) {
-      const d = partialDate[1], mo = partialDate[2];
-      let yr = partialDate[3];
+    // Update running date from ANY line that starts with DD.MM.
+    // (covers date-only lines AND combined "03.01. 03.01. SEPA..." lines)
+    const dateAtStart = /^(\d{2})\.(\d{2})\./.exec(line);
+    if (dateAtStart && !/kontoauszug vom|bis |inhaber|neuer saldo/i.test(line)) {
+      const d = dateAtStart[1], mo = dateAtStart[2];
+      // Look for 4-digit year in the rest of this line or the next line
+      const rem = line.substring(dateAtStart[0].length);
+      const yrInLine = /\b(20\d{2})\b/.exec(rem);
+      let yr = yrInLine ? yrInLine[1] : null;
       if (!yr) {
-        // Year on next line?
-        const nextL = lines[i + 1] || '';
-        yr = /^\d{4}$/.test(nextL.trim()) ? nextL.trim() : String(currentYear);
+        const nextL = (lines[i+1] || '').trim();
+        yr = /^\d{4}$/.test(nextL) ? nextL : String(currentYear);
       }
       lastDate = `${yr}-${mo}-${d}`;
-      continue;
-    }
-    // Full date in header "01.04.2025" → update running date
-    const fullDate = /\b(\d{2})\.(\d{2})\.(\d{4})\b/.exec(line);
-    if (fullDate && !/kontoauszug vom|bis |inhaber/i.test(line)) {
-      lastDate = `${fullDate[3]}-${fullDate[2]}-${fullDate[1]}`;
+      // If this line is ONLY a date (no SEPA content), skip further processing
+      if (/^(\d{2})\.(\d{2})\.(\s*\d{4})?$/.test(line)) continue;
     }
 
-    // ── Only continue for SEPA transaction lines ──
+    // ── Only continue for lines containing a transaction type keyword ──
     if (!TX_RE.test(line)) continue;
 
-    const txType = line.trim(); // e.g. "SEPA Überweisung von"
+    // Extract the transaction type string from the line
+    const txType = TX_RE.exec(line)[1];
 
-    // ── Collect the block: this line + following lines until next SEPA marker ──
+    // Extract any INLINE amount from this line (Soll/Haben col on same Y row)
+    // e.g. from "03.01. 03.01. SEPA Dauerauftrag an - 255,71"
+    const INLINE_RE = /([+\-])\s*(\d{1,3}(?:\.\d{3})*,\d{2})/g;
+    let inlineAmt = 0;
+    for (const m of line.matchAll(INLINE_RE)) {
+      inlineAmt = parseFloat((m[1]+m[2]).replace(/\./g,'').replace(',','.')); // keep last match
+    }
+
+    // ── Collect the block: following lines until next TX marker ──
     const blockLines = [line];
     let vzweck = '';
     let nextVZ = false;
     for (let j = i + 1; j < lines.length && j <= i + 12; j++) {
       const nl = lines[j];
       if (!nl || nl.length < 2) continue;
-      if (TX_RE.test(nl)) break; // next transaction starts
+      if (TX_RE.test(nl) && nl !== line) break; // next transaction starts
       // Detect "Verwendungszweck/ Kundenreferenz" → next line is the purpose
       if (/^Verwendungszweck\//i.test(nl)) { nextVZ = true; continue; }
       if (nextVZ) { vzweck = nl; nextVZ = false; }
@@ -2705,35 +2717,37 @@ function parsePdfBank(text) {
 
     // ── Find amount ──
     const AMT_RE = /^([+\-])\s*(\d{1,3}(?:\.\d{3})*,\d{2})$/;
-    let amt = 0;
-    // For dividends/Zinsen the bank credits a POSITIVE net amount after deducting tax lines (−).
-    // Search forward preferring + amounts for these types, to avoid picking up tax deductions.
-    const isIncome = /ZINSEN|DIVIDENDEN|Gutschrift/i.test(txType);
-    if (isIncome) {
-      for (let k = i; k <= Math.min(lines.length - 1, i + 20); k++) {
-        const m = AMT_RE.exec(lines[k]);
-        if (m && m[1] === '+') { amt = parseFloat(('+'+m[2]).replace(/\./g,'').replace(',','.')); break; }
-      }
-    }
-    // General forward search (any sign)
+    // Start with inline amount found on the same Y-row as the SEPA marker
+    let amt = inlineAmt;
     if (!amt) {
-      for (let k = i; k <= Math.min(lines.length - 1, i + 15); k++) {
-        const m = AMT_RE.exec(lines[k]);
-        if (m) { amt = parseFloat((m[1]+m[2]).replace(/\./g,'').replace(',','.')); break; }
+      // For dividends/Zinsen prefer the positive net credit over negative tax lines
+      const isIncome = /ZINSEN|DIVIDENDEN|Gutschrift/i.test(txType);
+      if (isIncome) {
+        for (let k = i; k <= Math.min(lines.length - 1, i + 20); k++) {
+          const m = AMT_RE.exec(lines[k]);
+          if (m && m[1] === '+') { amt = parseFloat(('+'+m[2]).replace(/\./g,'').replace(',','.')); break; }
+        }
       }
-    }
-    // If not found forward, search backward (Haben amounts appear before descriptions)
-    if (!amt) {
-      for (let k = i - 1; k >= Math.max(0, i - 10); k--) {
-        const m = AMT_RE.exec(lines[k]);
-        if (m) { amt = parseFloat((m[1]+m[2]).replace(/\./g,'').replace(',','.')); break; }
+      // General forward search (any sign)
+      if (!amt) {
+        for (let k = i; k <= Math.min(lines.length - 1, i + 15); k++) {
+          const m = AMT_RE.exec(lines[k]);
+          if (m) { amt = parseFloat((m[1]+m[2]).replace(/\./g,'').replace(',','.')); break; }
+        }
       }
-    }
-    // Last resort: any number in block
-    if (!amt) {
-      const anyAmt = [...blockLines.join(' ').matchAll(/([+\-]?\s*\d{1,3}(?:\.\d{3})*,\d{2})/g)];
-      if (anyAmt.length > 0) {
-        amt = parseFloat(anyAmt[0][1].replace(/\s/g,'').replace(/\./g,'').replace(',','.'));
+      // Backward search (Haben amounts sometimes before descriptions)
+      if (!amt) {
+        for (let k = i - 1; k >= Math.max(0, i - 10); k--) {
+          const m = AMT_RE.exec(lines[k]);
+          if (m) { amt = parseFloat((m[1]+m[2]).replace(/\./g,'').replace(',','.')); break; }
+        }
+      }
+      // Last resort: any number in block
+      if (!amt) {
+        const anyAmt = [...blockLines.join(' ').matchAll(/([+\-]?\s*\d{1,3}(?:\.\d{3})*,\d{2})/g)];
+        if (anyAmt.length > 0) {
+          amt = parseFloat(anyAmt[0][1].replace(/\s/g,'').replace(/\./g,'').replace(',','.'));
+        }
       }
     }
 
