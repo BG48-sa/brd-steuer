@@ -1,4 +1,4 @@
-const CACHE = 'brd-steuer-v17';
+const CACHE = 'brd-steuer-v35';
 const FILES = ['./BRD_Steuerbelege.html'];
 
 self.addEventListener('install', e => {

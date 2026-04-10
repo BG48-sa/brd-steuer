@@ -710,11 +710,14 @@ function renderOverview() {
   const all        = getDocs().filter(d => d.year === currentYear);
   const totalFiles = all.reduce((s, d) => s + d.files.length, 0);
   const wSt        = wAllStats(currentYear);
-  const wTxCount   = wGetTxs().filter(t => t.date.startsWith(currentYear+'')).length;
+  const aptIds     = new Set(PROPS_W.filter(p=>!p.g).map(p=>p.id));
+  const wTxCount   = wGetTxs().filter(t => t.date.startsWith(currentYear+'') && aptIds.has(t.pid)).length;
+  const wDocCount  = docsBySection('wohnungen', currentYear).length;
+  const totalWohn  = wTxCount + wDocCount;
 
   let html = `
     <div class="hero-card">
-      <div class="hero-lbl">Steuerbelege ${currentYear}</div>
+      <div class="hero-lbl">Steuerbelege ${currentYear} <span style="font-size:10px;opacity:.5">v35</span></div>
       <div class="hero-num">${all.length}</div>
       <div class="hero-sub">${all.length === 1 ? 'Dokument' : 'Dokumente'} · ${totalFiles} ${totalFiles === 1 ? 'Datei' : 'Dateien'}</div>
     </div>
@@ -724,12 +727,15 @@ function renderOverview() {
   SECTIONS.forEach(s => {
     let subLabel = '', badgeHtml = '';
     if (s.id === 'wohnungen') {
-      // Wohnungen uses imm_txs, show financial summary
-      if (wTxCount > 0) {
+      // Wohnungen: combine imm_txs bookings + imported brd_docs
+      if (totalWohn > 0) {
         const sign = wSt.res >= 0 ? '+' : '';
         const col  = wSt.res >= 0 ? 'var(--green)' : 'var(--red)';
-        subLabel  = `${wTxCount} Buchung${wTxCount > 1 ? 'en' : ''} · <span style="color:${col};font-weight:600">${sign}${wEur(wSt.res)}</span>`;
-        badgeHtml = `<span class="badge">${wTxCount}</span>`;
+        const buchLabel = wTxCount > 0 ? `${wTxCount} Buchung${wTxCount > 1 ? 'en' : ''}` : '';
+        const docLabel  = wDocCount > 0 ? `${wDocCount} Dokument${wDocCount > 1 ? 'e' : ''}` : '';
+        const parts = [buchLabel, docLabel].filter(Boolean).join(' · ');
+        subLabel  = wSt.res !== 0 ? `${parts} · <span style="color:${col};font-weight:600">${sign}${wEur(wSt.res)}</span>` : parts;
+        badgeHtml = `<span class="badge">${totalWohn}</span>`;
       } else {
         badgeHtml = `<span class="badge-0">0</span>`;
       }
@@ -855,6 +861,8 @@ function renderBelege() {
 // ─── Level 0: all sections ───
 function renderBSections() {
   const wTxCount = wGetTxs().filter(t => t.date.startsWith(currentYear+'')).length;
+  const wDocCount = docsBySection('wohnungen', currentYear).length;
+  const totalWohn = wTxCount + wDocCount;
   const wSt      = wAllStats(currentYear);
 
   let html = `<div class="year-row">
@@ -867,11 +875,14 @@ function renderBSections() {
   SECTIONS.forEach(s => {
     let subLabel = '', badgeHtml = '';
     if (s.id === 'wohnungen') {
-      if (wTxCount > 0) {
+      if (totalWohn > 0) {
         const sign = wSt.res >= 0 ? '+' : '';
         const col  = wSt.res >= 0 ? 'var(--green)' : 'var(--red)';
-        subLabel  = `${wTxCount} Buchung${wTxCount > 1 ? 'en' : ''} · <span style="color:${col};font-weight:600">${sign}${wEur(wSt.res)}</span>`;
-        badgeHtml = `<span class="badge">${wTxCount}</span>`;
+        const buchLabel = wTxCount > 0 ? `${wTxCount} Buchung${wTxCount > 1 ? 'en' : ''}` : '';
+        const docLabel  = wDocCount > 0 ? `${wDocCount} Dokument${wDocCount > 1 ? 'e' : ''}` : '';
+        const parts = [buchLabel, docLabel].filter(Boolean).join(' · ');
+        subLabel  = wSt.res !== 0 ? `${parts} · <span style="color:${col};font-weight:600">${sign}${wEur(wSt.res)}</span>` : parts;
+        badgeHtml = `<span class="badge">${totalWohn}</span>`;
       }
     } else if (s.id === 'garagen') {
       const garProps = PROPS_W.filter(p=>p.g);
@@ -1380,16 +1391,18 @@ function renderExport() {
   const fCnt     = all.reduce((s, d) => s + d.files.length, 0);
   const wSt      = wAllStats(currentYear);
   const wTxCount = wGetTxs().filter(t => t.date.startsWith(currentYear+'')).length;
+  const wDocCount = docsBySection('wohnungen', currentYear).length;
+  const totalWohn = wTxCount + wDocCount;
 
   let rows = '';
   SECTIONS.forEach(s => {
     let badgeHtml = '', subHtml = '';
     if (s.id === 'wohnungen') {
-      if (wTxCount > 0) {
+      if (totalWohn > 0) {
         const sign = wSt.res >= 0 ? '+' : '';
         const col  = wSt.res >= 0 ? 'var(--green)' : 'var(--red)';
-        badgeHtml = `<span class="badge">${wTxCount}</span>`;
-        subHtml   = `<div class="row-sub" style="color:${col};font-weight:600">${sign}${wEur(wSt.res)}</div>`;
+        badgeHtml = `<span class="badge">${totalWohn}</span>`;
+        if (wSt.res !== 0) subHtml = `<div class="row-sub" style="color:${col};font-weight:600">${sign}${wEur(wSt.res)}</div>`;
       } else {
         badgeHtml = `<span class="badge-0">0</span>`;
       }
@@ -1432,7 +1445,7 @@ function renderExport() {
     <div class="hero-card" style="padding:16px 20px">
       <div class="hero-lbl">Steuerbelege ${currentYear}</div>
       <div class="hero-num" style="font-size:36px">${all.length}</div>
-      <div class="hero-sub">${all.length === 1 ? 'Dokument' : 'Dokumente'} · ${fCnt} ${fCnt === 1 ? 'Datei' : 'Dateien'} · ${wTxCount} Buchungen</div>
+      <div class="hero-sub">${all.length === 1 ? 'Dokument' : 'Dokumente'} · ${fCnt} ${fCnt === 1 ? 'Datei' : 'Dateien'}${wTxCount > 0 ? ' · ' + wTxCount + ' Buchungen' : ''}</div>
     </div>
     <div class="sec-hdr">Zusammenfassung</div>
     <div class="card">${rows}</div>
@@ -1446,6 +1459,9 @@ function renderExport() {
     <button class="export-btn" style="color:var(--orange);border:2px solid var(--orange)" onclick="document.getElementById('restore-input').click()">📂 Backup wiederherstellen</button>
     <input type="file" id="restore-input" accept=".json" style="display:none" onchange="doRestore(this)">
     <div style="margin:8px 16px 0;font-size:12px;color:var(--gray1);text-align:center">💡 Backup regelmäßig erstellen und in iCloud oder per E-Mail sichern</div>
+    <div class="sec-hdr" style="margin-top:16px">Daten zurücksetzen</div>
+    <button class="export-btn" style="color:var(--red);border:2px solid var(--red)" onclick="doResetAll()">🗑️ Alle importierten Daten löschen</button>
+    <div style="margin:8px 16px 0;font-size:12px;color:var(--gray1);text-align:center">⚠️ Löscht alle Belege und Buchungen. Zuerst Backup erstellen!</div>
     <div class="spacer"></div>`;
 
   document.getElementById('export-content').innerHTML = html;
@@ -1479,12 +1495,13 @@ function doPrint() {
     if (s.id === 'wohnungen') {
       // Show apartment financial summary
       if (!wTxs.length) { body += `<div class="none">Keine Buchungen erfasst</div>`; return; }
-      PROPS_W.forEach(p => {
+      PROPS_W.filter(p=>!p.g).forEach(p => {
         const ps  = wPropStats(p.id, currentYear);
         if (!ps.n) return;
         const ebc = wExpByCat(p.id, currentYear);
         const ibc = wIncByCat(p.id, currentYear);
-        body += `<div style="margin:10px 0 4px;font-weight:600;font-size:13px">● ${p.name}</div>`;
+        const tenantTag = p.tenant ? ` (${p.tenant})` : '';
+        body += `<div style="margin:10px 0 4px;font-weight:600;font-size:13px">● ${p.name}${tenantTag}</div>`;
         Object.entries(ibc).forEach(([c,a]) => body += `<div class="fin-row"><span style="color:#8E8E93">${c}</span><span style="color:#34C759">+${wEur(a)}</span></div>`);
         Object.entries(ebc).forEach(([c,a]) => body += `<div class="fin-row"><span style="color:#8E8E93">${c}</span><span style="color:#FF3B30">−${wEur(a)}</span></div>`);
         const rCol = ps.res>=0?'#34C759':'#FF3B30';
@@ -1520,10 +1537,11 @@ function doCopy() {
     if (s.id === 'wohnungen') {
       if (!wTxs.length) return;
       txt += `${s.name}\n${'-'.repeat(20)}\n`;
-      PROPS_W.forEach(p => {
+      PROPS_W.filter(p=>!p.g).forEach(p => {
         const ps = wPropStats(p.id, currentYear);
         if (!ps.n) return;
-        txt += `  ${p.name}: Einnahmen ${wEur(ps.inc)} / Ausgaben ${wEur(ps.exp)} / Ergebnis ${ps.res>=0?'+':''}${wEur(ps.res)}\n`;
+        const tenantTag = p.tenant ? ` (${p.tenant})` : '';
+        txt += `  ${p.name}${tenantTag}: Einnahmen ${wEur(ps.inc)} / Ausgaben ${wEur(ps.exp)} / Ergebnis ${ps.res>=0?'+':''}${wEur(ps.res)}\n`;
       });
       txt += `  GESAMT: ${wSt.res>=0?'+':''}${wEur(wSt.res)}\n\n`;
       return;
@@ -1556,14 +1574,14 @@ function findType(sectionId, typeId) {
 // ════════════════════════════════════════════
 
 const PROPS_W = [
-  { id:'elektra',        name:'Elektrastr.',        short:'Elektra',  color:'#007AFF', g:false },
-  { id:'isartal_vgb',    name:'Isartalstr. VGB',    short:'Isar VGB', color:'#34C759', g:false },
-  { id:'isartal_studio', name:'Isartalstr. Studio',  short:'Isar Std', color:'#FF9500', g:false },
-  { id:'frundsberger',   name:'Frundsbergstr.',      short:'Frundsb.', color:'#AF52DE', g:false },
-  { id:'rosenheimer',    name:'Rosenheimerstr.',     short:'Rosen.',   color:'#FF2D55', g:false },
-  { id:'gar_sarnthein',  name:'Garage Sarnthein',   short:'G.Sarn.',  color:'#5856D6', g:true  },
-  { id:'gar_elektra',    name:'Garage Elektrastr.',  short:'G.Elek.',  color:'#32ADE6', g:true  },
-  { id:'gar_isartal',    name:'Garage Isartalstr.',  short:'G.Isar.',  color:'#30B0C7', g:true  },
+  { id:'elektra',        name:'Elektrastr.',              short:'Elektra',  color:'#007AFF', g:false, tenant:''              },
+  { id:'isartal_vgb',    name:'Isartalstr. 28 Whg 23',    short:'Isar W23', color:'#34C759', g:false, tenant:'Claudio Gelmi' },
+  { id:'isartal_studio', name:'Isartalstr. 28 Whg 15',    short:'Isar W15', color:'#FF9500', g:false, tenant:'Levina'        },
+  { id:'frundsberger',   name:'Frundsbergstr.',            short:'Frundsb.', color:'#AF52DE', g:false, tenant:''              },
+  { id:'rosenheimer',    name:'Rosenheimerstr.',           short:'Rosen.',   color:'#FF2D55', g:false, tenant:''              },
+  { id:'gar_sarnthein',  name:'Garage Sarnthein',         short:'G.Sarn.',  color:'#5856D6', g:true,  tenant:''              },
+  { id:'gar_elektra',    name:'Garage Elektrastr.',        short:'G.Elek.',  color:'#32ADE6', g:true,  tenant:'Baumgartner'   },
+  { id:'gar_isartal',    name:'Garage Isartalstr.',        short:'G.Isar.',  color:'#30B0C7', g:true,  tenant:'Starosta'      },
 ];
 
 const W_CAT_INC = [
@@ -1611,6 +1629,116 @@ function wMonthKey(d)  { return d.substring(0,7); }
 function wMonthLabel(k){ const [y,m]=k.split('-'); return W_MONTHS[parseInt(m)-1]+' '+y; }
 function wGetProp(id)  { return PROPS_W.find(p=>p.id===id); }
 
+// Auto-detect property from transaction text (title + description)
+function detectPid(text) {
+  const t = (text||'').toLowerCase();
+  // ── Tenants (by last name — most reliable for rent payments) ──
+  if (/pantos/.test(t))                            return 'rosenheimer';
+  if (/gelmi/.test(t))                             return 'isartal_vgb';
+  if (/levin[a]?/.test(t))                         return 'isartal_studio';
+  if (/flach[e]?/.test(t))                         return 'frundsberger';
+  if (/starosta/.test(t))                               return 'gar_isartal';
+  if (/muller.baumgartner|baumgartner/.test(t))         return 'gar_elektra';
+  // ── Unit numbers ──
+  if (/whg[\s.\-]*13\b|wohnung[\s.\-]*13\b|einheit[\s.\-]*13\b/.test(t))  return 'rosenheimer';
+  // ── Garages first (most specific address keywords) ──
+  if (/garage|stellplatz|g\.\s*sarn|g\.\s*elek|g\.\s*isar/.test(t)) {
+    if (/sarnthein/.test(t))                       return 'gar_sarnthein';
+    if (/isartal/.test(t))                         return 'gar_isartal';
+    if (/elektra/.test(t))                         return 'gar_elektra';
+  }
+  // ── Apartments by street / unit number (Whg OR Einheit OR Wohnung) ──
+  if (/isartal[^\w]*studio|isar[^\w]*std\b|(?:whg|wohnung|einheit)[\s.\-]*15\b/.test(t)) return 'isartal_studio';
+  if (/isartal[^\w]*vgb|isartal[^\w]*v\.?g\.?b|(?:whg|wohnung|einheit)[\s.\-]*23\b/.test(t)) return 'isartal_vgb';
+  if (/frundsb/.test(t))                           return 'frundsberger';
+  if (/rosenhei/.test(t))                          return 'rosenheimer';
+  if (/sarnthein/.test(t))                         return 'gar_sarnthein';
+  if (/elektra/.test(t))                           return 'elektra';
+  if (/isartal/.test(t))                           return 'isartal_vgb'; // fallback
+  return null;
+}
+
+// Migrate any wohnungen brd_docs → imm_txs so financial dashboard works
+function migrateWohnungenDocs() {
+  const existing = wGetTxs();
+  const existIds = new Set(existing.map(t => t.id));
+  const newTxs   = [];
+  const removeIds = [];
+
+  // Helper: try to move a brd_doc to imm_txs if a property can be detected
+  const tryMigrate = (d) => {
+    if (existIds.has(d.id)) return; // already in imm_txs
+
+    // Parse amount
+    let amt = typeof d.amt === 'number' ? d.amt : NaN;
+    if (isNaN(amt)) {
+      const m = /([+\-]?\s*[\d.]+,\d{2})\s*€|€\s*([+\-]?\s*[\d.]+,\d{2})/.exec(d.notes||'');
+      if (m) amt = parseFloat((m[1]||m[2]).replace(/\s/g,'').replace(/\./g,'').replace(',','.'));
+    }
+    if (isNaN(amt)) return;
+
+    // Parse date
+    const date = d.date || (() => {
+      const m = /(\d{2})\.(\d{2})\.(\d{4})/.exec(d.title||'');
+      return m ? `${m[3]}-${m[2]}-${m[1]}` : wToday();
+    })();
+
+    // Detect property from full text
+    const fullText = (d.title||'') + ' ' + (d.notes||'');
+    const pid = d.pid || detectPid(fullText);
+    if (!pid) return;
+
+    const isInc = amt >= 0;
+    const name  = (d.title||'').replace(/\s*–\s*\d{2}\.\d{2}\.\d{4}$/, '').trim();
+    const ftLow = fullText.toLowerCase();
+    const cat   = isInc ? 'Kaltmiete'
+      : /hausgeld|weg\b|monatsgeld|hausverwalt/.test(ftLow) ? 'Hausverwaltung'
+      : /grundsteuer/.test(ftLow) ? 'Grundsteuer'
+      : /reparatur|renovier|handwerk/.test(ftLow) ? 'Reparaturen / Instandhaltung'
+      : /versicherung/.test(ftLow) ? 'Gebäudeversicherung'
+      : 'Sonstige Werbungskosten';
+    newTxs.push({
+      id: d.id, pid,
+      type: isInc ? 'income' : 'expense',
+      amt:  Math.abs(amt),
+      cat, desc: name,
+      date, inv: '', doc: null, docFileId: null
+    });
+    removeIds.push(d.id);
+  };
+
+  // Scan ALL brd_docs — wohnungen section first, then any doc whose title/notes
+  // matches a tenant name or property keyword
+  getDocs().forEach(d => tryMigrate(d));
+
+  // Re-process ALL imm_txs entries with updated detectPid + fix wrong categories
+  // (tenant names take priority — fixes wrongly-assigned entries from earlier migrations)
+  let changed = newTxs.length > 0;
+  const fixedTxs = existing.map(t => {
+    let fix = { ...t };
+    let dirty = false;
+    // Fix property assignment — check all available text fields
+    const text = (t.desc||'') + ' ' + (t.cat||'') + ' ' + (t.notes||'') + ' ' + (t.name||'');
+    const pid = detectPid(text);
+    if (pid && pid !== t.pid) { fix.pid = pid; dirty = true; }
+    // Fix wrong categories (e.g. "Schuldzinsen" for WEG/Hausgeld entries)
+    if (t.type === 'expense') {
+      const d = (t.desc||'').toLowerCase();
+      if (/weg\b|hausgeld|monatsgeld|wohnlast|hausverwalt|kostentragung|abrechnung/.test(d) && t.cat !== 'Hausverwaltung') {
+        fix.cat = 'Hausverwaltung'; dirty = true;
+      } else if (/grundsteuer|stadt\s*m(u|ü|ue)nchen.*511/.test(d) && t.cat !== 'Grundsteuer') {
+        fix.cat = 'Grundsteuer'; dirty = true;
+      }
+    }
+    if (dirty) { changed = true; return fix; }
+    return t;
+  });
+
+  if (!changed) return;
+  wSaveTxs([...fixedTxs, ...newTxs]);
+  if (removeIds.length) saveDocs(getDocs().filter(d => !removeIds.includes(d.id)));
+}
+
 function wPropStats(pid, yr) {
   const txs = wGetTxs().filter(t=>t.pid===pid && t.date.startsWith(yr+''));
   const inc  = txs.filter(t=>t.type==='income').reduce((s,t)=>s+t.amt,0);
@@ -1618,7 +1746,8 @@ function wPropStats(pid, yr) {
   return { inc, exp, res:inc-exp, n:txs.length };
 }
 function wAllStats(yr) {
-  const txs = wGetTxs().filter(t=>t.date.startsWith(yr+''));
+  const aptIds = new Set(PROPS_W.filter(p=>!p.g).map(p=>p.id));
+  const txs = wGetTxs().filter(t=>t.date.startsWith(yr+'') && aptIds.has(t.pid));
   const inc  = txs.filter(t=>t.type==='income').reduce((s,t)=>s+t.amt,0);
   const exp  = txs.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amt,0);
   return { inc, exp, res:inc-exp };
@@ -1701,10 +1830,11 @@ function renderGaragenSection() {
       const ps = wPropStats(p.id, yr);
       const rs = ps.res>=0?'+':'';
       const col = ps.res>=0?'var(--green)':'var(--red)';
+      const tenantLine = p.tenant ? `<span style="color:var(--gray1);font-size:11px"> · ${p.tenant}</span>` : '';
       html += `<div class="list-row" onclick="gJumpToTxs('${p.id}')">
         <div style="width:12px;height:12px;border-radius:50%;background:${p.color};flex-shrink:0"></div>
         <div class="row-body">
-          <div class="row-title">${p.name}</div>
+          <div class="row-title">${p.name}${tenantLine}</div>
           <div class="row-sub">+${wEur(ps.inc)} / −${wEur(ps.exp)}</div>
         </div>
         <div style="font-size:16px;font-weight:700;color:${col}">${rs}${wEur(ps.res)}</div>
@@ -1717,7 +1847,7 @@ function renderGaragenSection() {
     if (recent.length > 0) {
       html += `<div class="sec-hdr">Letzte Buchungen</div><div class="card">`;
       recent.forEach(t => {
-        const p = wGetProp(t.pid);
+        const p = wGetProp(t.pid) || { color:'#8E8E93', short:'?', name:'Unbekannt' };
         const isInc = t.type==='income';
         const col = isInc?'var(--green)':'var(--red)';
         html += `<div class="doc-row" onclick="wEditTx('${t.id}')">
@@ -1754,7 +1884,7 @@ function renderGaragenSection() {
         const gExp = grp.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amt,0);
         html += `<div class="sec-hdr" style="padding-top:10px">${wMonthLabel(k)} &nbsp;·&nbsp; +${wEur(gInc)} / −${wEur(gExp)}</div><div class="card">`;
         grp.forEach(t => {
-          const p = wGetProp(t.pid);
+          const p = wGetProp(t.pid) || { color:'#8E8E93', short:'?', name:'Unbekannt' };
           const isInc = t.type==='income';
           const col = isInc?'var(--green)':'var(--red)';
           html += `<div style="display:flex;align-items:center;border-bottom:0.5px solid var(--gray5)">
@@ -1788,10 +1918,11 @@ function renderGaragenSection() {
       const rs = ps.res>=0?'+':'';
       const rBg = ps.res>=0?'#ECFDF5':'#FFF1F0';
       const rCol = ps.res>=0?'var(--green)':'var(--red)';
+      const gTenantLine = p.tenant ? ` <span style="font-size:13px;font-weight:500;color:var(--gray1)">· ${p.tenant}</span>` : '';
       html += `<div style="background:var(--card);border-radius:16px;margin:10px 16px 0;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.07)">
         <div style="display:flex;align-items:center;gap:10px;padding:14px 16px 10px;border-bottom:.5px solid var(--gray5)">
           <div style="width:12px;height:12px;border-radius:50%;background:${p.color}"></div>
-          <div style="font-size:16px;font-weight:700">${p.name}</div>
+          <div style="font-size:16px;font-weight:700">${p.name}${gTenantLine}</div>
         </div>`;
       if(Object.keys(ibc).length) Object.entries(ibc).forEach(([c,a])=>{ html+=`<div style="display:flex;justify-content:space-between;padding:8px 16px;font-size:14px"><span style="color:var(--gray1)">${c}</span><span style="font-weight:500;color:var(--green)">${wEur(a)}</span></div>`; });
       html += `<div style="display:flex;justify-content:space-between;padding:10px 16px;font-weight:700;font-size:15px;border-top:.5px solid var(--gray5)"><span>Summe Einnahmen</span><span style="color:var(--green)">${wEur(ps.inc)}</span></div>`;
@@ -1838,14 +1969,15 @@ function wRenderDash() {
     <div class="sec-hdr">Objekte</div>
     <div class="card">`;
 
-  PROPS_W.forEach(p => {
+  PROPS_W.filter(p => !p.g).forEach(p => {
     const ps   = wPropStats(p.id, yr);
     const rs   = ps.res>=0?'+':'';
     const col  = ps.res>=0?'var(--green)':'var(--red)';
+    const tenantLine = p.tenant ? `<span style="color:var(--gray1);font-size:11px"> · ${p.tenant}</span>` : '';
     h += `<div class="list-row" onclick="wJumpToTxs('${p.id}')">
       <div style="width:12px;height:12px;border-radius:50%;background:${p.color};flex-shrink:0"></div>
       <div class="row-body">
-        <div class="row-title">${p.name}</div>
+        <div class="row-title">${p.name}${tenantLine}</div>
         <div class="row-sub">+${wEur(ps.inc)} / −${wEur(ps.exp)}</div>
       </div>
       <div style="font-size:16px;font-weight:700;color:${col}">${rs}${wEur(ps.res)}</div>
@@ -1854,12 +1986,13 @@ function wRenderDash() {
   });
   h += `</div>`;
 
-  // Recent transactions
-  const recent = wGetTxs().filter(t=>t.date.startsWith(yr+'')).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5);
+  // Recent transactions (apartments only)
+  const aptIdsD = new Set(PROPS_W.filter(p=>!p.g).map(p=>p.id));
+  const recent = wGetTxs().filter(t=>t.date.startsWith(yr+'') && aptIdsD.has(t.pid)).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5);
   if (recent.length > 0) {
     h += `<div class="sec-hdr">Letzte Buchungen</div><div class="card">`;
     recent.forEach(t => {
-      const p = wGetProp(t.pid);
+      const p = wGetProp(t.pid) || { color:'#8E8E93', short:'?', name:'Unbekannt' };
       const isInc = t.type==='income';
       const col   = isInc?'var(--green)':'var(--red)';
       h += `<div class="doc-row" onclick="wEditTx('${t.id}')">
@@ -1881,53 +2014,134 @@ function wJumpToTxs(pid) { wFilter = pid; wSetTab('txs'); }
 // ─── Transactions ───
 function wRenderTxs() {
   const yr  = currentYear;
-  let txs   = wGetTxs();
+  const aptIdsT = new Set(PROPS_W.filter(p=>!p.g).map(p=>p.id));
+  let txs   = wGetTxs().filter(t => aptIdsT.has(t.pid));
   if (wFilter !== 'all') txs = txs.filter(t=>t.pid===wFilter);
   txs = [...txs].sort((a,b)=>b.date.localeCompare(a.date));
 
-  // Filter chips
+  // Also get imported brd_docs for wohnungen, filtered by property
+  let importedDocs = getDocs().filter(d => d.sectionId === 'wohnungen' && d.year === yr);
+  if (wFilter !== 'all') {
+    importedDocs = importedDocs.filter(d => {
+      const pid = d.pid || detectPid((d.title||'') + ' ' + (d.notes||''));
+      return pid === wFilter;
+    });
+  }
+
+  // Filter chips (apartments only — garages have their own section)
   let chips = `<button class="chip${wFilter==='all'?' on':''}" style="${wFilter==='all'?'background:var(--blue);color:white':''}" onclick="wSetFilter('all')">Alle</button>`;
-  PROPS_W.forEach(p => {
+  PROPS_W.filter(p => !p.g).forEach(p => {
     const on = wFilter===p.id;
     chips += `<button class="chip${on?' on':''}" style="${on?'background:'+p.color+';color:white':''}" onclick="wSetFilter('${p.id}')">${p.short}</button>`;
   });
 
   let h = `<div class="chip-bar" style="padding:4px 16px 8px;gap:8px">${chips}</div>`;
 
-  if (!txs.length) {
+  if (!txs.length && !importedDocs.length) {
     h += `<div class="empty"><div class="ico">📋</div><h3>Keine Buchungen</h3><p>Tippe oben auf „+ Neu" um die erste<br>Buchung zu erfassen.</p></div>`;
     return h;
   }
 
-  const groups = {};
-  txs.forEach(t => { const k=wMonthKey(t.date); if(!groups[k]) groups[k]=[]; groups[k].push(t); });
+  // ── Manual imm_txs bookings ──
+  if (txs.length) {
+    const groups = {};
+    txs.forEach(t => { const k=wMonthKey(t.date); if(!groups[k]) groups[k]=[]; groups[k].push(t); });
 
-  Object.keys(groups).sort((a,b)=>b.localeCompare(a)).forEach(k => {
-    const grp  = groups[k];
-    const gInc = grp.filter(t=>t.type==='income').reduce((s,t)=>s+t.amt,0);
-    const gExp = grp.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amt,0);
-    h += `<div class="sec-hdr" style="padding-top:10px">${wMonthLabel(k)} &nbsp;·&nbsp; +${wEur(gInc)} / −${wEur(gExp)}</div>`;
-    h += `<div class="card">`;
-    grp.forEach(t => {
-      const p = wGetProp(t.pid);
-      const isInc = t.type==='income';
-      const col   = isInc?'var(--green)':'var(--red)';
-      const docBadge = (t.doc||t.docFileId) ? ` <span style="background:var(--gray5);color:var(--gray1);font-size:10px;padding:1px 5px;border-radius:5px">📎</span>` : '';
-      const invBadge = t.inv ? ` <span style="background:var(--gray5);color:var(--gray1);font-size:10px;padding:1px 5px;border-radius:5px">Nr.${t.inv}</span>` : '';
-      h += `<div style="display:flex;align-items:center;border-bottom:0.5px solid var(--gray5)">
-        <div class="doc-row" onclick="wEditTx('${t.id}')" style="flex:1;border-bottom:none;padding-right:4px">
-          <div style="width:38px;height:38px;border-radius:11px;background:${p.color}20;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">${isInc?'💰':'📄'}</div>
-          <div class="doc-body">
-            <div class="doc-title">${esc(t.desc||t.cat)}${invBadge}${docBadge}</div>
-            <div class="doc-meta">${p.short} · ${t.cat}</div>
+    Object.keys(groups).sort((a,b)=>b.localeCompare(a)).forEach(k => {
+      const grp  = groups[k];
+      const gInc = grp.filter(t=>t.type==='income').reduce((s,t)=>s+t.amt,0);
+      const gExp = grp.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amt,0);
+      h += `<div class="sec-hdr" style="padding-top:10px">${wMonthLabel(k)} &nbsp;·&nbsp; +${wEur(gInc)} / −${wEur(gExp)}</div>`;
+      h += `<div class="card">`;
+      grp.forEach(t => {
+        const p = wGetProp(t.pid) || { color:'#8E8E93', short:'?' };
+        const isInc = t.type==='income';
+        const col   = isInc?'var(--green)':'var(--red)';
+        const docBadge = (t.doc||t.docFileId) ? ` <span style="background:var(--gray5);color:var(--gray1);font-size:10px;padding:1px 5px;border-radius:5px">📎</span>` : '';
+        const invBadge = t.inv ? ` <span style="background:var(--gray5);color:var(--gray1);font-size:10px;padding:1px 5px;border-radius:5px">Nr.${t.inv}</span>` : '';
+        h += `<div style="display:flex;align-items:center;border-bottom:0.5px solid var(--gray5)">
+          <div class="doc-row" onclick="wEditTx('${t.id}')" style="flex:1;border-bottom:none;padding-right:4px">
+            <div style="width:38px;height:38px;border-radius:11px;background:${p.color}20;display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">${isInc?'💰':'📄'}</div>
+            <div class="doc-body">
+              <div class="doc-title">${esc(t.desc||t.cat)}${invBadge}${docBadge}</div>
+              <div class="doc-meta">${p.short} · ${t.cat}</div>
+            </div>
+            <div style="font-size:15px;font-weight:600;color:${col};flex-shrink:0">${isInc?'+':'−'}${wEur(t.amt)}</div>
           </div>
-          <div style="font-size:15px;font-weight:600;color:${col};flex-shrink:0">${isInc?'+':'−'}${wEur(t.amt)}</div>
-        </div>
-        <button onclick="wQuickDelete('${t.id}')" style="flex-shrink:0;padding:10px 14px;background:none;border:none;cursor:pointer;font-size:18px;color:var(--gray2)" title="Löschen">🗑</button>
-      </div>`;
+          <button onclick="wQuickDelete('${t.id}')" style="flex-shrink:0;padding:10px 14px;background:none;border:none;cursor:pointer;font-size:18px;color:var(--gray2)" title="Löschen">🗑</button>
+        </div>`;
+      });
+      h += `</div>`;
     });
-    h += `</div>`;
-  });
+  }
+
+  // ── Imported brd_docs ──
+  if (importedDocs.length) {
+    // helper: parse amount from doc (new field or from notes)
+    const docAmt = d => {
+      if (typeof d.amt === 'number') return d.amt;
+      const m = /([+\-]?\s*[\d.,]+)\s*€|€\s*([+\-]?\s*[\d.,]+)/.exec(d.notes||'');
+      if (!m) return NaN;
+      const s = (m[1]||m[2]).replace(/\s/g,'').replace(/\./g,'').replace(',','.');
+      return parseFloat(s);
+    };
+    // helper: parse date from doc
+    const docDate = d => {
+      if (d.date) return d.date;
+      const m = /(\d{2})\.(\d{2})\.(\d{4})/.exec(d.title||'');
+      if (m) return `${m[3]}-${m[2]}-${m[1]}`;
+      return '';
+    };
+
+    // Sort by date desc
+    const sorted = [...importedDocs].sort((a,b) => (docDate(b)||'').localeCompare(docDate(a)||''));
+
+    // Group by month
+    const iGroups = {};
+    sorted.forEach(d => {
+      const dt = docDate(d);
+      const k  = dt ? dt.substring(0,7) : 'unbekannt';
+      if (!iGroups[k]) iGroups[k] = [];
+      iGroups[k].push(d);
+    });
+
+    h += `<div class="sec-hdr" style="padding-top:${txs.length?'14':'10'}px">📥 Importierte Belege (${importedDocs.length})</div>`;
+
+    Object.keys(iGroups).sort((a,b)=>b.localeCompare(a)).forEach(k => {
+      const grp = iGroups[k];
+      const mLabel = k === 'unbekannt' ? 'Unbekannt' : (() => {
+        const [yr2,mo] = k.split('-');
+        return new Date(+yr2, +mo-1, 1).toLocaleDateString('de-DE',{month:'long',year:'numeric'});
+      })();
+      const mSum = grp.reduce((s,d)=>{ const a=docAmt(d); return s+(isNaN(a)?0:a); },0);
+      const mCol = mSum>=0?'var(--green)':'var(--red)';
+      h += `<div class="sec-hdr" style="padding-top:6px;font-size:12px">${mLabel} &nbsp;·&nbsp; <span style="color:${mCol}">${mSum>=0?'+':''}${wEur(mSum)}</span></div>`;
+      h += `<div class="card">`;
+      grp.forEach(d => {
+        const amt  = docAmt(d);
+        const isInc = !isNaN(amt) && amt >= 0;
+        const col  = isInc ? 'var(--green)' : 'var(--red)';
+        const amtStr = isNaN(amt) ? '–' : `${isInc?'+':''}${wEur(amt)}`;
+        // name is everything before " – DD.MM.YYYY" in title
+        const name = (d.title||'').replace(/\s*–\s*\d{2}\.\d{2}\.\d{4}$/, '');
+        const dt = docDate(d);
+        const dtLabel = dt ? new Date(dt).toLocaleDateString('de-DE',{day:'2-digit',month:'2-digit',year:'numeric'}) : '';
+        const dPid  = d.pid || detectPid((d.title||'') + ' ' + (d.notes||''));
+        const dProp = dPid ? wGetProp(dPid) : null;
+        const propDot = dProp ? `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${dProp.color};margin-right:4px;vertical-align:middle"></span>${dProp.short} · ` : '';
+        h += `<div class="doc-row" onclick="bNav('docdetail',{docId:'${d.id}'})">
+          <div style="width:38px;height:38px;border-radius:11px;background:${dProp?dProp.color+'20':'var(--blue)15'};display:flex;align-items:center;justify-content:center;font-size:18px;flex-shrink:0">🏠</div>
+          <div class="doc-body">
+            <div class="doc-title">${esc(name)}</div>
+            <div class="doc-meta">${propDot}${dtLabel}</div>
+          </div>
+          <div style="font-size:15px;font-weight:600;color:${col};flex-shrink:0">${amtStr}</div>
+        </div>`;
+      });
+      h += `</div>`;
+    });
+  }
+
   return h;
 }
 
@@ -1948,11 +2162,11 @@ function wRenderTax() {
   const yr  = currentYear;
   const tot = wAllStats(yr);
   const sign = tot.res>=0?'+':'';
-  const active = PROPS_W.filter(p=>wPropStats(p.id,yr).n>0);
+  const active = PROPS_W.filter(p=>!p.g && wPropStats(p.id,yr).n>0);
 
   let h = `
     <div style="background:linear-gradient(135deg,#1C1C1E,#2C2C2E);color:white;border-radius:20px;margin:12px 16px 0;padding:18px 20px;box-shadow:0 4px 16px rgba(0,0,0,0.3)">
-      <div style="font-size:13px;opacity:.6">Steuerliches Ergebnis ${yr} · §21 EStG</div>
+      <div style="font-size:13px;opacity:.6">Steuerliches Ergebnis ${yr} · §21 EStG — Wohnungen</div>
       <div style="font-size:30px;font-weight:700;margin:3px 0 10px;letter-spacing:-.3px">${sign}${wEur(tot.res)}</div>
       <div style="font-size:13px;opacity:.75;display:flex;gap:16px">
         <span>📈 ${wEur(tot.inc)}</span><span>📉 ${wEur(tot.exp)}</span>
@@ -1971,11 +2185,12 @@ function wRenderTax() {
     const rs  = ps.res>=0?'+':'';
     const rBg = ps.res>=0?'#ECFDF5':'#FFF1F0';
     const rCol= ps.res>=0?'var(--green)':'var(--red)';
+    const tenantLine = p.tenant ? ` <span style="font-size:13px;font-weight:500;color:var(--gray1)">· ${p.tenant}</span>` : '';
 
     h += `<div style="background:var(--card);border-radius:16px;margin:10px 16px 0;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,0.07)">
       <div style="display:flex;align-items:center;gap:10px;padding:14px 16px 10px;border-bottom:.5px solid var(--gray5)">
         <div style="width:12px;height:12px;border-radius:50%;background:${p.color}"></div>
-        <div style="font-size:16px;font-weight:700">${p.name}</div>
+        <div style="font-size:16px;font-weight:700">${p.name}${tenantLine}</div>
       </div>
       <div style="font-size:11px;font-weight:700;color:var(--gray1);text-transform:uppercase;letter-spacing:.5px;padding:10px 16px 4px">Einnahmen (§21 EStG)</div>`;
     if (!Object.keys(ibc).length) {
@@ -2193,7 +2408,8 @@ function wDoExport() {
   PROPS_W.forEach(p => {
     const ps=wPropStats(p.id,yr); if(!ps.n) return;
     const ebc=wExpByCat(p.id,yr), ibc=wIncByCat(p.id,yr);
-    txt += `\n${'─'.repeat(52)}\n  OBJEKT: ${p.name}\n${'─'.repeat(52)}\n  EINNAHMEN:\n`;
+    const expTenant = p.tenant ? ` (Mieter: ${p.tenant})` : '';
+    txt += `\n${'─'.repeat(52)}\n  OBJEKT: ${p.name}${expTenant}\n${'─'.repeat(52)}\n  EINNAHMEN:\n`;
     if(!Object.keys(ibc).length) txt+=`    (keine)\n`; else Object.entries(ibc).forEach(([c,a])=>txt+=`    ${c.padEnd(34)} ${wEur(a).padStart(10)}\n`);
     txt += `  Summe Einnahmen:      ${wEur(ps.inc).padStart(12)}\n\n  WERBUNGSKOSTEN:\n`;
     if(!Object.keys(ebc).length) txt+=`    (keine)\n`; else Object.entries(ebc).forEach(([c,a])=>txt+=`    ${c.padEnd(34)} ${wEur(a).padStart(10)}\n`);
@@ -2214,31 +2430,52 @@ function wDoExport() {
 // ════════════════════════════════════════════
 
 // ── Property name detection (from Deutsche Bank Verwendungszweck notes) ──
+// IMPORTANT: Tenant names FIRST (most specific), then address patterns (fallback).
 const PROP_ALIASES = [
-  { pattern: /elektrastr(asse)?\.?\s*\d*|elektra\s+\d/i,          propId:'elektra',        propName:'Elektrastr.',       sectionId:'wohnungen', typeId:'wohnungen_allgemein' },
-  { pattern: /isartalstr(asse)?\.?\s*\d*|isartal\s+\d/i,          propId:'isartal_vgb',    propName:'Isartalstr.',       sectionId:'wohnungen', typeId:'wohnungen_allgemein' },
-  { pattern: /frundsbergstr(asse)?\.?|frundsberger\s+str/i,        propId:'frundsberger',   propName:'Frundsbergstr.',    sectionId:'wohnungen', typeId:'wohnungen_allgemein' },
-  { pattern: /rosenheimerstr(asse)?\.?|rosenheimer\s+str/i,        propId:'rosenheimer',    propName:'Rosenheimerstr.',   sectionId:'wohnungen', typeId:'wohnungen_allgemein' },
-  { pattern: /wohnung\s+sarnthein|sarnthein\s+whg|sarnthein\s+wohnung/i, propId:null,      propName:'Wohnung Sarnthein', sectionId:'wohnungen', typeId:'wohnung_sarnthein'  },
+  // ── Tenant names → direct property assignment ──
+  { pattern: /\bgelmi\b|claudio\s+(?:ugobaldo\s+)?gelmi/i,                propId:'isartal_vgb',    propName:'Isartalstr. 28 Whg 23 (Gelmi)',   sectionId:'wohnungen', typeId:'wohnungen_allgemein' },
+  { pattern: /\blevina?\b|maksim\s+levin|natali[ae]?\s+levin/i,           propId:'isartal_studio',  propName:'Isartalstr. 28 Whg 15 (Levina)',  sectionId:'wohnungen', typeId:'wohnungen_allgemein' },
+  { pattern: /\bpantos\b|marina\s+pantos/i,                                propId:'rosenheimer',    propName:'Rosenheimerstr. (Pantos)',          sectionId:'wohnungen', typeId:'wohnungen_allgemein' },
+  { pattern: /\bflache?\b|anke\s+flach/i,                                  propId:'frundsberger',   propName:'Frundsbergstr. (Flach)',            sectionId:'wohnungen', typeId:'wohnungen_allgemein' },
+  { pattern: /\bstarosta\b/i,                                              propId:'gar_isartal',    propName:'Garage Isartalstr. (Starosta)',     sectionId:'garagen',   typeId:'garage_isartalstrasse' },
+  { pattern: /\bbaumgartner\b|muller.baumgartner/i,                        propId:'gar_elektra',    propName:'Garage Elektrastr. (Baumgartner)',  sectionId:'garagen',   typeId:'garage_elektrastrasse' },
+  // ── Garages by name (before address patterns) ──
   { pattern: /garage\s+sarnthein|sarnthein\s+garage/i,             propId:'gar_sarnthein',  propName:'Garage Sarnthein',  sectionId:'garagen',   typeId:'garage_sarnthein'   },
   { pattern: /garage\s+elektra(str(asse)?)?|elektra(str(asse)?)?\s+garage/i,  propId:'gar_elektra', propName:'Garage Elektrastr.', sectionId:'garagen', typeId:'garage_elektrastrasse' },
   { pattern: /garage\s+isartal(str(asse)?)?|isartal(str(asse)?)?\s+garage/i, propId:'gar_isartal', propName:'Garage Isartalstr.', sectionId:'garagen', typeId:'garage_isartalstrasse' },
+  // ── Whg/Einheit-number patterns (before generic address patterns) ──
+  { pattern: /(?:whg|wohnung|einheit)[\s.\-]*23\b/i,              propId:'isartal_vgb',    propName:'Isartalstr. 28 Whg 23',  sectionId:'wohnungen', typeId:'wohnungen_allgemein' },
+  { pattern: /(?:whg|wohnung|einheit)[\s.\-]*15\b/i,              propId:'isartal_studio',  propName:'Isartalstr. 28 Whg 15',  sectionId:'wohnungen', typeId:'wohnungen_allgemein' },
+  { pattern: /(?:whg|wohnung|einheit)[\s.\-]*13\b/i,              propId:'rosenheimer',    propName:'Rosenheimerstr.',         sectionId:'wohnungen', typeId:'wohnungen_allgemein' },
+  // ── Address patterns (generic fallback) ──
+  { pattern: /elektrastr(asse)?\.?\s*\d*|elektra\s+\d/i,          propId:'elektra',        propName:'Elektrastr.',       sectionId:'wohnungen', typeId:'wohnungen_allgemein' },
+  { pattern: /isartals?r?t?r?str(a(ss|ß)e)?\.?\s*\d*|isartal\s+\d/i, propId:'isartal_vgb',  propName:'Isartalstr.',       sectionId:'wohnungen', typeId:'wohnungen_allgemein' },
+  { pattern: /frundsbergstr(asse)?\.?|frundsberger\s+str/i,        propId:'frundsberger',   propName:'Frundsbergstr.',    sectionId:'wohnungen', typeId:'wohnungen_allgemein' },
+  { pattern: /rosenheimerstr(asse)?\.?|rosenheimer\s+str/i,        propId:'rosenheimer',    propName:'Rosenheimerstr.',   sectionId:'wohnungen', typeId:'wohnungen_allgemein' },
+  { pattern: /wohnung\s+sarnthein|sarnthein\s+whg|sarnthein\s+wohnung/i, propId:null,      propName:'Wohnung Sarnthein', sectionId:'wohnungen', typeId:'wohnung_sarnthein'  },
 ];
 
 const TAX_RULES = [
+  // ── Mieter (Tenant names) — classified as wohnungen even without property keywords ──
+  { pattern: /\blevina?\b|natali[a]?\s+levin|maksim\s+levin|gelmi|pantos|marina\s+pantos|\bflach[e]?\b|anke\s+flach|starosta|muller.baumgartner|baumgartner/i, sectionId:'wohnungen', typeId:'wohnungen_allgemein', label:'Mieteinnahme', needsReview:false },
   // ── Mieteinnahmen & Immobilien ── (confirmed tax relevant)
   { pattern: /\bmiete\b|kaltmiete|mieteinnahme|miete\s+whg|miete\s+\d|miete\s+[a-z]/i,              sectionId:'wohnungen',       typeId:'wohnungen_allgemein',       label:'Mieteinnahme',                needsReview:false },
   { pattern: /grundsteuer/i,                                                                            sectionId:'wohnungen',       typeId:'wohnungen_allgemein',       label:'Grundsteuer',                 needsReview:false },
-  { pattern: /hausverwaltung|hausgeld|wohnungseigent|monatsgeld|wohnlast|weg\b|hausgeld|ueberzahlung.{0,20}hausgeld|kostentragung|abrechnung.{0,30}vorschuss/i, sectionId:'wohnungen', typeId:'wohnungen_allgemein', label:'Hausverwaltung', needsReview:false },
+  { pattern: /hausverwaltung|hausgeld|wohnungseigent|monatsgeld|wohnlast|weg\b|hausgeld|ueberzahlung.{0,20}hausgeld|kostentragung|abrechnung.{0,30}vorschuss|whg[\s\.\-]*\d+|wohnung[\s\.\-]*\d+|miete|kaltmiete|nebenkosten|mieteinnahme/i, sectionId:'wohnungen', typeId:'wohnungen_allgemein', label:'Hausverwaltung', needsReview:false },
   { pattern: /reparatur|instandhaltung|handwerker|renovierung|sanit|elektriker/i,                      sectionId:'wohnungen',       typeId:'wohnungen_allgemein',       label:'Reparatur/Renovierung',       needsReview:false },
   // ── Garagen ──
   { pattern: /garage|stellplatz|tiefgarage|parkplatz|garagenstellplatz/i,                              sectionId:'garagen',         typeId:'garage_sarnthein',          label:'Garage/Stellplatz',           needsReview:false },
   // ── Kapitalerträge ──
   { pattern: /zinsen|dividenden|dividende|ertraege|ertrage|kapitalertrag|depot|dividend|interest|securities|custody.?fee/i, sectionId:'deutsche_bank', typeId:'jahressteuerbescheinigung', label:'Kapitalertrag/Zinsen', needsReview:false },
   // ── Versicherungen ──
-  { pattern: /krankenversicherung|krankenkasse|hallesche|aok\b|barmer|dak\b|ikk|bkk|pflegeversicherung/i, sectionId:'hallesche_kv', typeId:'hallesche_kv_brief',        label:'Kranken-/Pflegeversicherung', needsReview:false },
+  { pattern: /krankenversicherung|krankenkasse|hallesche|aok\b|barmer|dak\b|ikk|bkk|pflegeversicherung|beihilfe|staatsoberkasse/i, sectionId:'hallesche_kv', typeId:'hallesche_kv_brief', label:'Kranken-/Pflegeversicherung', needsReview:false },
   { pattern: /haftpflicht|hausratversicherung|geb.udeversicherung|rechtsschutz/i,                      sectionId:'sonstiges',       typeId:'sonstiges_allgemein',       label:'Versicherung',                needsReview:false },
-  { pattern: /rentenversicherung|drv\b|deutsche rentenversicherung|\bpension\b|\bversorgung\b|betriebsrente|wages.*pension|salary.*pension|deutsche post ag|staatsoberkasse|renten.?service/i, sectionId:'deutsche_rente', typeId:'rente_brief', label:'Rente/Pension', needsReview:false },
+  // ── USA: Social Security & TIAA — must come BEFORE Deutsche Rente rule ──
+  { pattern: /social.security|federal.reserve.bank.*ny|ssa.?1099|ssn.*benefit|pymt.type.pens/i, sectionId:'usa', typeId:'social_security', label:'US Social Security', needsReview:false },
+  { pattern: /\btiaa\b|tiaa.?cref|teachers.insurance|annuity.association/i,                      sectionId:'usa', typeId:'tiaa',            label:'TIAA Distribution',  needsReview:false },
+  // ── Österreichische Pension (PVA) — must come BEFORE Deutsche Rente rule ──
+  { pattern: /\bpva\b|pensionsversicherungsanstalt|refno\d|pension.*pva|pva.*refno/i, sectionId:'oesterreichische_pension', typeId:'oepension_brief', label:'Österr. Pension (PVA)', needsReview:false },
+  { pattern: /rentenversicherung|drv\b|deutsche rentenversicherung|\bpension\b|\bversorgung\b|betriebsrente|wages.*pension|salary.*pension|deutsche post ag|renten.?service/i, sectionId:'deutsche_rente', typeId:'rente_brief', label:'Rente/Pension', needsReview:false },
   // ── Sonderausgaben ──
   { pattern: /kirchensteuer|kirchenbeitrag/i,                                                          sectionId:'kirche',          typeId:'kirchen_bescheid',          label:'Kirchensteuer',               needsReview:false },
   { pattern: /spende\b|caritas|rotes kreuz|unicef|greenpeace|diakonie|misereor|drk\b/i,               sectionId:'spenden',         typeId:'spenden_bescheinigung',     label:'Spende',                      needsReview:false },
@@ -2289,15 +2526,19 @@ function parseAnyDate(s) {
   return '';
 }
 
-// Parse amount string (German 1.234,56 OR English 1234.56 / -1234.56)
+// Parse amount string (German 1.234,56 OR English 1,234.56 / 1234.56 / -1234.56 / 1,000)
 function parseAnyAmt(s) {
   s = s.trim().replace(/\s/g,'');
   if (!s || s === '-' || s === '+') return NaN;
-  // German: 1.234,56
+  // German: 1.234,56 (period=thousands, comma=decimal)
   if (/\d+\.\d{3},\d{2}$/.test(s)) return parseFloat(s.replace(/\./g,'').replace(',','.'));
   // German no-thousands: 234,56
   if (/^[+\-]?\d+,\d{2}$/.test(s)) return parseFloat(s.replace(',','.'));
-  // English: 1234.56 or -1234.56
+  // English with thousands: 1,234.56 or 7,748.73 (comma=thousands, period=decimal)
+  if (/^[+\-]?\d{1,3}(,\d{3})+\.\d+$/.test(s)) return parseFloat(s.replace(/,/g,''));
+  // English thousands no decimal: 1,000 or 1,095 or -5,672
+  if (/^[+\-]?\d{1,3}(,\d{3})+$/.test(s)) return parseFloat(s.replace(/,/g,''));
+  // English plain: 1234.56 or -1234.56 or 48.64
   if (/^[+\-]?\d+(\.\d+)?$/.test(s)) return parseFloat(s);
   return NaN;
 }
@@ -2385,12 +2626,18 @@ function parseCsv(text) {
   const header = lines[0].split(delim).map(h => h.replace(/^"|"$/g,'').trim().toLowerCase());
 
   let dateCol = -1, amtCol = -1, nameCol = -1, descCol = -1;
+  let debitCol = -1, creditCol = -1;
   header.forEach((h, i) => {
     if (/buchungstag|booking.?date|datum\b|^date$|buchungsdat/.test(h) && dateCol === -1) dateCol = i;
-    if (/betrag|amount|umsatzbetrag/.test(h)                           && amtCol  === -1) amtCol  = i;
+    if (/^betrag$|^amount$|umsatzbetrag/.test(h)                      && amtCol  === -1) amtCol  = i;
+    if (/^debit$|^soll$|belastung/.test(h)                            && debitCol === -1) debitCol = i;
+    if (/^credit$|^haben$|gutschrift/.test(h)                         && creditCol === -1) creditCol = i;
     if (/beg.nstigter|auftraggeber|beneficiary|originator|payee|emp.nger|merchant/.test(h) && nameCol === -1) nameCol = i;
     if (/verwendungszweck|payment.?detail|payment.?ref|reference|purpose|description|details/.test(h) && descCol === -1) descCol = i;
   });
+  // Prefer Debit/Credit columns over generic "amount" (DB CSV uses separate Debit & Credit cols)
+  const hasDebitCredit = debitCol >= 0 || creditCol >= 0;
+  if (hasDebitCredit) amtCol = -1; // force per-row debit/credit logic below
   // Positional fallback
   if (dateCol === -1) dateCol = 0;
   if (nameCol === -1) nameCol = header.length >= 4 ? 3 : -1;
@@ -2424,8 +2671,16 @@ function parseCsv(text) {
     if (cols.length < 2) continue;
     const get = idx => idx >= 0 && idx < cols.length ? (cols[idx]||'').replace(/^"|"$/g,'').trim() : '';
 
-    // ── Amount ── (handles German 1.234,56 AND English 1234.56)
-    const amt = parseAnyAmt(get(amtCol));
+    // ── Amount ── (handles German 1.234,56 AND English 1,234.56)
+    let amt = NaN;
+    if (hasDebitCredit) {
+      // Try Credit first (positive), then Debit (negative)
+      const cr = parseAnyAmt(get(creditCol));
+      const db = parseAnyAmt(get(debitCol));
+      if (!isNaN(cr) && cr !== 0) amt = Math.abs(cr);
+      else if (!isNaN(db) && db !== 0) amt = -Math.abs(db);
+    }
+    if (isNaN(amt) || amt === 0) amt = parseAnyAmt(get(amtCol));
     if (isNaN(amt) || amt === 0) continue;
 
     // ── Date ── (handles German DD.MM.YYYY, US MM/DD/YYYY, ISO YYYY-MM-DD)
@@ -2463,6 +2718,7 @@ function parseCsv(text) {
           name: name || desc.substring(0,60), desc,
           taxLabel: rule.label + propNote,
           taxSectionId: sectionId, taxTypeId: typeId,
+          detectedPropId: detectedProp?.propId || null,
           detectedPropName: detectedProp?.propName || null,
           needsReview: rule.needsReview && !detectedProp,
           accepted: true
@@ -2478,6 +2734,7 @@ function parseCsv(text) {
         name: name || desc.substring(0,60), desc,
         taxLabel: `${detectedProp.propName} — Transaktion`,
         taxSectionId: detectedProp.sectionId, taxTypeId: detectedProp.typeId,
+        detectedPropId: detectedProp.propId || null,
         detectedPropName: detectedProp.propName,
         needsReview: false, accepted: true
       };
@@ -2665,7 +2922,7 @@ function parsePdfBank(text) {
   // all on ONE Y-row, so lines often look like:
   //   "03.01. 03.01. SEPA Dauerauftrag an - 255,71"
   // TX_RE must NOT have ^ anchor so it matches mid-line too.
-  const TX_RE = /(SEPA\s+(?:Überweisung|Dauerauftrag|Lastschrift(?:einzug)?|Gutschrift|Einlastschrift)\s+(?:von|an)|ZINSEN\/DIVIDENDEN(?:\/\S+)?|Wertpapier(?:kauf|verkauf)|Kartenabrechnung|Barauszahlung|Scheckeinreichung)/i;
+  const TX_RE = /(SEPA\s+(?:Echtzeit(?:überweisung)?|Überweisung|Dauerauftrag|Lastschrift(?:einzug)?|Gutschrift|Einlastschrift)\s+(?:von|an)|ZINSEN\/DIVIDENDEN(?:\/\S+)?|Wertpapier(?:kauf|verkauf)|Kartenabrechnung|Barauszahlung|Scheckeinreichung)/i;
 
   // Track the most recent date seen as we scan
   let lastDate = `${currentYear}-01-01`;
@@ -2795,6 +3052,7 @@ function parsePdfBank(text) {
           id: uid(), date: lastDate, name, desc, amt,
           taxLabel:     rule.label + (detectedProp ? ` · ${detectedProp.propName}` : ''),
           taxSectionId: sId, taxTypeId: tId,
+          detectedPropId: detectedProp?.propId || null,
           detectedPropName: detectedProp?.propName || null,
           needsReview:  rule.needsReview && !detectedProp,
           accepted: true
@@ -2808,6 +3066,7 @@ function parsePdfBank(text) {
         id: uid(), date: lastDate, name, desc, amt,
         taxLabel:     `${detectedProp.propName} — Transaktion`,
         taxSectionId: detectedProp.sectionId, taxTypeId: detectedProp.typeId,
+        detectedPropId: detectedProp.propId || null,
         detectedPropName: detectedProp.propName,
         needsReview: false, accepted: true
       });
@@ -2913,16 +3172,54 @@ function saveImportedTxs() {
   const toSave = importResults.filter(t => t.accepted);
   if (!toSave.length) { toast('⚠️ Keine Buchungen ausgewählt'); return; }
   const eurFmt = n => new Intl.NumberFormat('de-DE',{style:'currency',currency:'EUR'}).format(n);
+  const newWTxs = wGetTxs();
+
   toSave.forEach(t => {
     const dateStr = t.date ? t.date.split('-').reverse().join('.') : '–';
-    addDoc({
-      id: uid(), year: currentYear,
-      sectionId: t.taxSectionId, subsectionId: null, typeId: t.taxTypeId,
-      title: `${t.name} – ${dateStr}`,
-      notes: `${t.taxLabel} · ${t.amt>=0?'+':''}${eurFmt(t.amt)}${t.desc&&t.desc!==t.name?'\n'+t.desc:''}`,
-      files: [], createdAt: Date.now(), modifiedAt: Date.now()
-    });
+
+    // Wohnungen transactions → save directly to imm_txs so financial dashboard works
+    if (t.taxSectionId === 'wohnungen' || t.taxSectionId === 'garagen') {
+      const fullText = (t.name||'') + ' ' + (t.desc||'');
+      const pid = t.detectedPropId || detectPid(fullText);
+      const isInc = t.amt >= 0;
+      // Pick category from taxLabel
+      const lbl = (t.taxLabel||'').toLowerCase();
+      let cat;
+      if (isInc) {
+        cat = 'Kaltmiete';
+      } else if (/hausgeld|hausverwalt|weg\b|monatsgeld/.test(lbl) || /hausgeld|weg\b/.test(fullText.toLowerCase())) {
+        cat = 'Hausverwaltung';
+      } else if (/grundsteuer/.test(lbl)) {
+        cat = 'Grundsteuer';
+      } else if (/reparatur|renovier|handwerk/.test(lbl)) {
+        cat = 'Reparaturen / Instandhaltung';
+      } else if (/versicherung/.test(lbl)) {
+        cat = 'Gebäudeversicherung';
+      } else {
+        cat = 'Sonstige Werbungskosten';
+      }
+      newWTxs.push({
+        id: uid(), pid: pid || null,
+        type: isInc ? 'income' : 'expense',
+        amt: Math.abs(t.amt),
+        cat, desc: (t.desc && t.desc !== t.name) ? t.desc.substring(0, 200) : (t.name || ''),
+        date: t.date || wToday(),
+        inv: '', doc: null, docFileId: null
+      });
+    } else {
+      // All other sections → save to brd_docs as before
+      addDoc({
+        id: uid(), year: currentYear,
+        sectionId: t.taxSectionId, subsectionId: null, typeId: t.taxTypeId,
+        title: `${t.name} – ${dateStr}`,
+        notes: `${t.taxLabel} · ${t.amt>=0?'+':''}${eurFmt(t.amt)}${t.desc&&t.desc!==t.name?'\n'+t.desc:''}`,
+        files: [], createdAt: Date.now(), modifiedAt: Date.now(),
+        amt: t.amt, date: t.date
+      });
+    }
   });
+
+  wSaveTxs(newWTxs);
   importResults = [];
   toast(`✅ ${toSave.length} Belege gespeichert`);
   setTimeout(() => goTab('overview'), 800);
@@ -2934,6 +3231,7 @@ function saveImportedTxs() {
 
 initDB()
   .then(() => {
+    migrateWohnungenDocs(); // move any wohnungen brd_docs → imm_txs
     document.getElementById('ov-year').textContent = currentYear;
     renderOverview();
     renderExport();
@@ -2951,6 +3249,15 @@ initDB()
 // ════════════════════════════════════════════
 //  BACKUP & RESTORE
 // ════════════════════════════════════════════
+
+function doResetAll() {
+  if (!confirm('⚠️ ACHTUNG: Alle Belege und Buchungen werden gelöscht!\n\nHaben Sie ein aktuelles Backup?\n\nFortfahren?')) return;
+  if (!confirm('Wirklich alle Daten löschen? Diese Aktion kann nicht rückgängig gemacht werden.')) return;
+  localStorage.removeItem('brd_docs');
+  localStorage.removeItem('imm_txs');
+  toast('🗑️ Alle Daten gelöscht — bitte neu importieren');
+  setTimeout(() => { renderOverview(); renderExport(); }, 800);
+}
 
 async function doBackup() {
   toast('⏳ Backup wird erstellt…');
