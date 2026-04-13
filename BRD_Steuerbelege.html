@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="BRD Steuer">
-<title>BRD Steuerbelege v1.3</title>
+<title>BRD Steuerbelege</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
@@ -542,13 +542,35 @@ const SECTIONS = [
     ]
   },
   {
+    id: 'sonderausgaben',
+    name: 'Sonderausgaben',
+    icon: '📋',
+    color: '#FF9500',
+    subsections: [],
+    types: [
+      { id: 'sonderausgaben_steuerberatung', name: 'Steuerberatungskosten', anlage: 'Sonderausgaben', tip: 'Steuerberater-Rechnungen und Gebühren' },
+      { id: 'sonderausgaben_allgemein', name: 'Sonstige Sonderausgaben', anlage: 'Sonderausgaben', tip: 'Weitere steuerlich absetzbare Sonderausgaben' }
+    ]
+  },
+  {
+    id: 'werbungskosten',
+    name: 'Werbungskosten',
+    icon: '🧾',
+    color: '#5856D6',
+    subsections: [],
+    types: [
+      { id: 'werbungskosten_versicherung', name: 'Versicherungen', anlage: 'Vorsorgeaufwand', tip: 'Haftpflicht, Rechtsschutz, Hausrat u.a.' },
+      { id: 'werbungskosten_allgemein', name: 'Allgemeine Werbungskosten', anlage: 'Anlage N', tip: 'Arbeitsmittel, Fahrtkosten, Fortbildung u.a.' }
+    ]
+  },
+  {
     id: 'sonstiges',
     name: 'Sonstiges',
     icon: '📂',
     color: '#8E8E93',
     subsections: [],
     types: [
-      { id: 'sonstiges_allgemein', name: 'Sonstiger Beleg', anlage: null, tip: 'Dokumente die noch keiner Kategorie zugeordnet sind' }
+      { id: 'sonstiges_allgemein', name: 'Nicht zugeordnet', anlage: null, tip: 'Belege die noch keiner Kategorie zugeordnet sind' }
     ]
   }
 ];
@@ -710,14 +732,14 @@ function renderOverview() {
   const all        = getDocs().filter(d => d.year === currentYear);
   const totalFiles = all.reduce((s, d) => s + d.files.length, 0);
   const wSt        = wAllStats(currentYear);
-  const aptIds     = new Set(PROPS_W.filter(p=>!p.g).map(p=>p.id));
-  const wTxCount   = wGetTxs().filter(t => t.date.startsWith(currentYear+'') && aptIds.has(t.pid)).length;
+  const garIds     = new Set(PROPS_W.filter(p=>p.g).map(p=>p.id));
+  const wTxCount   = wGetTxs().filter(t => t.date.startsWith(currentYear+'') && !garIds.has(t.pid)).length;
   const wDocCount  = docsBySection('wohnungen', currentYear).length;
   const totalWohn  = wTxCount + wDocCount;
 
   let html = `
     <div class="hero-card">
-      <div class="hero-lbl">Steuerbelege ${currentYear} <span style="font-size:10px;opacity:.5">v35</span></div>
+      <div class="hero-lbl">Steuerbelege ${currentYear} <span style="font-size:10px;opacity:.5">v45</span></div>
       <div class="hero-num">${all.length}</div>
       <div class="hero-sub">${all.length === 1 ? 'Dokument' : 'Dokumente'} · ${totalFiles} ${totalFiles === 1 ? 'Datei' : 'Dateien'}</div>
     </div>
@@ -1054,6 +1076,12 @@ function renderBDocDetail(docId) {
         <span class="form-lbl">Notizen</span>
         <textarea class="form-ta" id="det-notes" placeholder="Optionale Notizen…">${esc(doc.notes || '')}</textarea>
       </div>
+      <div class="form-row">
+        <span class="form-lbl">Kategorie</span>
+        <select class="form-inp" id="det-section" style="font-size:15px;padding:8px 4px">
+          ${SECTIONS.map(s => `<option value="${s.id}"${s.id===doc.sectionId?' selected':''}>${s.icon} ${s.name}</option>`).join('')}
+        </select>
+      </div>
     </div>
 
     <div class="sec-hdr">Dateien (${doc.files.length})</div>
@@ -1063,6 +1091,14 @@ function renderBDocDetail(docId) {
     <button class="attach-btn" onclick="pickFile('${docId}')">📎 Foto oder PDF hinzufügen</button>
     <button class="attach-btn" onclick="pickCamera('${docId}')">📸 Kamera öffnen</button>
 
+    <div style="height:16px"></div>
+    <div class="sec-hdr">Zuordnen zu Objekt</div>
+    <div class="form-card" style="padding:12px 16px">
+      <div style="font-size:12px;color:var(--gray1);margin-bottom:10px">Beleg einem Objekt zuweisen und als Buchung speichern:</div>
+      <div style="display:flex;flex-wrap:wrap;gap:8px">
+        ${PROPS_W.map(p=>`<button onclick="moveDocToProperty('${docId}','${p.id}')" style="padding:7px 12px;border-radius:10px;border:1.5px solid ${p.color};background:${p.color}18;color:${p.color};font-size:12px;font-weight:600;cursor:pointer">${p.short}</button>`).join('')}
+      </div>
+    </div>
     <div style="height:16px"></div>
     <button class="save-btn" onclick="saveDetail('${docId}')">💾 Speichern</button>
     <button class="del-btn" onclick="confirmDel('${docId}')">🗑️ Beleg löschen</button>
@@ -1078,12 +1114,65 @@ function saveDetail(docId) {
   const n = document.getElementById('det-notes');
   if (t) doc.title = t.value.trim() || doc.title;
   if (n) doc.notes = n.value.trim();
+  const sec = document.getElementById('det-section');
+  if (sec && sec.value !== doc.sectionId) {
+    doc.sectionId = sec.value;
+    const newSec = SECTIONS.find(s => s.id === sec.value);
+    if (newSec && newSec.types.length) doc.typeId = newSec.types[0].id;
+  }
   doc.modifiedAt = Date.now();
   updateDoc(doc);
   // refresh header
   const h1 = document.querySelector('#belege-hdr h1');
   if (h1) h1.textContent = doc.title;
   toast('✅ Gespeichert');
+}
+
+function moveDocToProperty(docId, propId) {
+  const doc = docById(docId);
+  if (!doc) return;
+  const prop = wGetProp(propId);
+  if (!prop) return;
+  if (!confirm(`Beleg "${doc.title}" zu "${prop.name}" verschieben?`)) return;
+
+  // Parse amount from doc
+  let amt = typeof doc.amt === 'number' ? doc.amt : NaN;
+  if (isNaN(amt)) {
+    const m = /([+\-]?\s*[\d.]+,\d{2})\s*€|€\s*([+\-]?\s*[\d.]+,\d{2})/.exec(doc.notes||'');
+    if (m) amt = parseFloat((m[1]||m[2]).replace(/\s/g,'').replace(/\./g,'').replace(',','.'));
+  }
+  if (isNaN(amt)) { toast('⚠️ Betrag konnte nicht erkannt werden'); return; }
+
+  // Parse date
+  let date = doc.date;
+  if (!date) {
+    const m = /(\d{2})\.(\d{2})\.(\d{4})/.exec(doc.title||'');
+    date = m ? `${m[3]}-${m[2]}-${m[1]}` : wToday();
+  }
+
+  const isInc = amt >= 0;
+  const ftLow = ((doc.title||'') + ' ' + (doc.notes||'')).toLowerCase();
+  const cat = isInc ? 'Kaltmiete'
+    : /hausgeld|weg\b|monatsgeld|hausverwalt|kostentragung|abrechnung/.test(ftLow) ? 'Hausverwaltung'
+    : /grundsteuer/.test(ftLow) ? 'Grundsteuer'
+    : /reparatur|renovier|handwerk/.test(ftLow) ? 'Reparaturen / Instandhaltung'
+    : /versicherung|vers\.verein|rechtsschutz/.test(ftLow) ? 'Gebäudeversicherung'
+    : /notar|steuerberatung|beratung/.test(ftLow) ? 'Sonstige Werbungskosten'
+    : 'Sonstige Werbungskosten';
+
+  const name = (doc.title||'').replace(/\s*–\s*\d{2}\.\d{2}\.\d{4}$/, '').trim();
+  const newTxs = wGetTxs();
+  newTxs.push({
+    id: doc.id, pid: propId,
+    type: isInc ? 'income' : 'expense',
+    amt: Math.abs(amt), cat, desc: name,
+    date, inv: '', doc: null, docFileId: null
+  });
+  wSaveTxs(newTxs);
+  saveDocs(getDocs().filter(d => d.id !== docId));
+  toast(`✅ Verschoben zu ${prop.name}`);
+  navStack.pop();
+  renderBelege();
 }
 
 async function confirmDel(docId) {
@@ -1357,24 +1446,18 @@ async function viewFile(fileId, fileName) {
   const blob = new Blob([rec.data], { type: rec.type });
   const url  = URL.createObjectURL(blob);
 
+  document.getElementById('modal-title').textContent = fileName;
+  const body = document.getElementById('modal-body');
   if (rec.type.startsWith('image/')) {
-    // Images → show in in-app modal
-    document.getElementById('modal-title').textContent = fileName;
-    const body = document.getElementById('modal-body');
     body.innerHTML = `<img class="modal-img" src="${url}">`;
-    document.getElementById('file-modal').classList.add('show');
   } else {
-    // PDFs → open in new tab (Safari blocks blob iframes from file://)
-    const a = document.createElement('a');
-    a.href = url;
-    a.target = '_blank';
-    a.rel = 'noopener';
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    // revoke after short delay
-    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    // PDFs → show inline in modal (iOS Safari blocks blob URLs in new tabs)
+    body.innerHTML = `<div style="display:flex;flex-direction:column;gap:10px;padding:10px 0">
+      <iframe src="${url}" style="width:100%;height:70vh;border:1px solid var(--gray4);border-radius:8px"></iframe>
+      <a href="${url}" download="${fileName}" style="text-align:center;color:var(--blue);font-weight:600;font-size:15px;text-decoration:none;padding:10px">📥 Herunterladen</a>
+    </div>`;
   }
+  document.getElementById('file-modal').classList.add('show');
 }
 
 function closeModal() {
@@ -1446,13 +1529,13 @@ function renderExport() {
       <div class="hero-lbl">Steuerbelege ${currentYear}</div>
       <div class="hero-num" style="font-size:36px">${all.length}</div>
       <div class="hero-sub">${all.length === 1 ? 'Dokument' : 'Dokumente'} · ${fCnt} ${fCnt === 1 ? 'Datei' : 'Dateien'}${wTxCount > 0 ? ' · ' + wTxCount + ' Buchungen' : ''}</div>
-      <div style="margin-top:8px;font-size:11px;opacity:0.5;font-family:monospace">v1.3 · ${new Date('2026-04-13').toLocaleDateString('de-DE')}</div>
     </div>
     <div class="sec-hdr">Zusammenfassung</div>
     <div class="card">${rows}</div>
     ${wohnungenBox}
     <div class="sec-hdr">Export</div>
     <button class="export-btn" onclick="doPrint()">🖨️ Drucken / Als PDF speichern</button>
+    <button class="export-btn" style="color:#0066CC;border:2px solid #0066CC" onclick="doElsterExport()">📊 ELSTER-Zuordnung exportieren</button>
     <button class="export-btn" onclick="wDoExport()">📤 Wohnungen Anlage V exportieren</button>
     <button class="export-btn" onclick="doCopy()">📋 Zusammenfassung kopieren</button>
     <div class="sec-hdr">Datensicherung</div>
@@ -1468,10 +1551,97 @@ function renderExport() {
   document.getElementById('export-content').innerHTML = html;
 }
 
+// Convert ArrayBuffer to base64 data URI
+function bufToDataUri(buf, type) {
+  const bytes = new Uint8Array(buf);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+  return `data:${type};base64,${btoa(binary)}`;
+}
+
+// Render a PDF ArrayBuffer to an array of image data URIs using pdf.js
+async function pdfToImages(buf, maxPages) {
+  if (!window.pdfjsLib) return [];
+  const imgs = [];
+  try {
+    const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(buf) }).promise;
+    const limit = maxPages ? Math.min(maxPages, pdf.numPages) : pdf.numPages;
+    for (let p = 1; p <= limit; p++) {
+      const page = await pdf.getPage(p);
+      const vp = page.getViewport({ scale: 1.2 }); // lower scale = faster + less memory
+      const canvas = document.createElement('canvas');
+      canvas.width = vp.width; canvas.height = vp.height;
+      await page.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+      imgs.push(canvas.toDataURL('image/jpeg', 0.75));
+      // free memory
+      canvas.width = 0; canvas.height = 0;
+    }
+    imgs._totalPages = pdf.numPages;
+  } catch(e) { console.warn('PDF render error:', e); }
+  return imgs;
+}
+
 function doPrint() {
+  // Open window IMMEDIATELY (synchronous) so iOS Safari doesn't block it
+  const w = window.open('', '_blank');
+  if (!w) { toast('⚠️ Popup blockiert — bitte Popups erlauben'); return; }
+  w.document.write('<html><head><meta charset="UTF-8"><title>Wird geladen…</title></head><body style="font-family:Helvetica,sans-serif;text-align:center;padding:60px"><h2>📄 Dateien werden eingebettet …</h2><p id="prog">Bitte warten …</p></body></html>');
+  w.document.close();
+  _doPrintAsync(w);
+}
+
+async function _doPrintAsync(w) {
   const docs  = getDocs().filter(d => d.year === currentYear);
   const wTxs  = wGetTxs().filter(t => t.date.startsWith(currentYear+''));
   const wSt   = wAllStats(currentYear);
+
+  // Count total files to show progress
+  const allFiles = docs.flatMap(d => d.files || []);
+  const totalFiles = allFiles.length;
+  let doneFiles = 0;
+
+  function updateProgress(msg) {
+    try {
+      const el = w.document.getElementById('prog');
+      if (el) el.textContent = msg;
+    } catch(e) {}
+  }
+
+  // Helper: wrap a promise with a timeout (ms)
+  function withTimeout(promise, ms) {
+    return Promise.race([
+      promise,
+      new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), ms))
+    ]);
+  }
+
+  // Pre-load all attached files from IndexedDB (with timeout per file)
+  const fileCache = {};
+  const MAX_PDF_PAGES = 4;  // limit PDF pages to avoid memory issues
+  const FILE_TIMEOUT = 15000; // 15 sec per file max
+
+  for (const d of docs) {
+    for (const f of (d.files || [])) {
+      doneFiles++;
+      updateProgress(`Datei ${doneFiles} / ${totalFiles}: ${f.name || '...'}`);
+      try {
+        const rec = await withTimeout(dbGet(f.id), FILE_TIMEOUT);
+        if (rec) {
+          if (rec.type.startsWith('image/')) {
+            fileCache[f.id] = { type: 'image', html: `<img src="${bufToDataUri(rec.data, rec.type)}" style="max-width:100%;max-height:800px;border:1px solid #E5E5EA;border-radius:4px;margin:6px 0">` };
+          } else if (rec.type === 'application/pdf') {
+            const imgs = await withTimeout(pdfToImages(rec.data, MAX_PDF_PAGES), FILE_TIMEOUT);
+            const pagesNote = imgs.length < (rec._totalPages||999) ? `<div style="font-size:10px;color:#8E8E93;font-style:italic">Erste ${imgs.length} Seiten angezeigt</div>` : '';
+            fileCache[f.id] = { type: 'pdf', html: imgs.map((src,i) => `<img src="${src}" style="max-width:100%;border:1px solid #E5E5EA;border-radius:4px;margin:4px 0"><div style="font-size:10px;color:#8E8E93;text-align:center;margin-bottom:8px">Seite ${i+1}</div>`).join('') + pagesNote };
+          }
+        }
+      } catch(e) {
+        console.warn('File embed skipped:', f.name, e.message);
+        fileCache[f.id] = { type: 'skip', html: `<div style="font-size:11px;color:#8E8E93;font-style:italic;padding:4px 0">📎 ${esc(f.name)} (nicht eingebettet)</div>` };
+      }
+    }
+  }
+  updateProgress('Dokument wird erstellt …');
 
   let body = `<html><head><meta charset="UTF-8"><title>Steuerbelege ${currentYear}</title>
   <style>
@@ -1486,15 +1656,16 @@ function doPrint() {
     .none { color: #8E8E93; font-style: italic; font-size: 13px; }
     .fin-row { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 0.5px solid #E5E5EA; }
     .fin-total { display: flex; justify-content: space-between; padding: 7px 0; font-weight: 700; font-size: 15px; }
-    @media print { body { margin: 20px; } }
+    .file-section { margin: 8px 0 12px 16px; padding: 8px; background: #FAFAFA; border-radius: 6px; }
+    .file-label { font-size: 11px; font-weight: 600; color: #8E8E93; margin-bottom: 4px; }
+    @media print { body { margin: 20px; } .file-section { break-inside: avoid; } img { break-inside: avoid; } }
   </style></head><body>
   <h1>📋 Steuerbelege ${currentYear}</h1>
-  <div class="sub">Anlage V – Einkünfte aus Vermietung und Verpachtung &nbsp;·&nbsp; Erstellt: ${new Date().toLocaleDateString('de-DE')}</div>`;
+  <div class="sub">Steuerbelege mit Anlagen &nbsp;·&nbsp; Erstellt: ${new Date().toLocaleDateString('de-DE')}</div>`;
 
   SECTIONS.forEach(s => {
     body += `<h2>${s.icon} ${s.name}</h2>`;
     if (s.id === 'wohnungen') {
-      // Show apartment financial summary
       if (!wTxs.length) { body += `<div class="none">Keine Buchungen erfasst</div>`; return; }
       PROPS_W.filter(p=>!p.g).forEach(p => {
         const ps  = wPropStats(p.id, currentYear);
@@ -1521,12 +1692,23 @@ function doPrint() {
         <div class="ititle">${esc(d.title)}${type?.anlage ? `<span class="tag">${type.anlage}</span>` : ''}</div>
         <div class="imeta">${fmtDate(d.createdAt)} · ${d.files.length} Datei${d.files.length !== 1 ? 'en' : ''}${d.notes ? ' · ' + esc(d.notes) : ''}</div>
       </div>`;
+      // Embed attached files
+      if (d.files.length) {
+        d.files.forEach(f => {
+          const cached = fileCache[f.id];
+          if (cached) {
+            body += `<div class="file-section"><div class="file-label">📎 ${esc(f.name)}</div>${cached.html}</div>`;
+          }
+        });
+      }
     });
   });
 
   body += `</body></html>`;
-  const w = window.open('', '_blank');
-  if (w) { w.document.write(body); w.document.close(); w.print(); }
+  w.document.open();
+  w.document.write(body);
+  w.document.close();
+  setTimeout(() => w.print(), 500);
 }
 
 function doCopy() {
@@ -1718,8 +1900,8 @@ function migrateWohnungenDocs() {
   const fixedTxs = existing.map(t => {
     let fix = { ...t };
     let dirty = false;
-    // Fix property assignment
-    const text = (t.desc||'') + ' ' + (t.cat||'');
+    // Fix property assignment — check all available text fields
+    const text = (t.desc||'') + ' ' + (t.cat||'') + ' ' + (t.notes||'') + ' ' + (t.name||'');
     const pid = detectPid(text);
     if (pid && pid !== t.pid) { fix.pid = pid; dirty = true; }
     // Fix wrong categories (e.g. "Schuldzinsen" for WEG/Hausgeld entries)
@@ -1747,8 +1929,8 @@ function wPropStats(pid, yr) {
   return { inc, exp, res:inc-exp, n:txs.length };
 }
 function wAllStats(yr) {
-  const aptIds = new Set(PROPS_W.filter(p=>!p.g).map(p=>p.id));
-  const txs = wGetTxs().filter(t=>t.date.startsWith(yr+'') && aptIds.has(t.pid));
+  const garIds = new Set(PROPS_W.filter(p=>p.g).map(p=>p.id));
+  const txs = wGetTxs().filter(t=>t.date.startsWith(yr+'') && !garIds.has(t.pid));
   const inc  = txs.filter(t=>t.type==='income').reduce((s,t)=>s+t.amt,0);
   const exp  = txs.filter(t=>t.type==='expense').reduce((s,t)=>s+t.amt,0);
   return { inc, exp, res:inc-exp };
@@ -1988,8 +2170,8 @@ function wRenderDash() {
   h += `</div>`;
 
   // Recent transactions (apartments only)
-  const aptIdsD = new Set(PROPS_W.filter(p=>!p.g).map(p=>p.id));
-  const recent = wGetTxs().filter(t=>t.date.startsWith(yr+'') && aptIdsD.has(t.pid)).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5);
+  const garIdsD = new Set(PROPS_W.filter(p=>p.g).map(p=>p.id));
+  const recent = wGetTxs().filter(t=>t.date.startsWith(yr+'') && !garIdsD.has(t.pid)).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5);
   if (recent.length > 0) {
     h += `<div class="sec-hdr">Letzte Buchungen</div><div class="card">`;
     recent.forEach(t => {
@@ -2015,8 +2197,8 @@ function wJumpToTxs(pid) { wFilter = pid; wSetTab('txs'); }
 // ─── Transactions ───
 function wRenderTxs() {
   const yr  = currentYear;
-  const aptIdsT = new Set(PROPS_W.filter(p=>!p.g).map(p=>p.id));
-  let txs   = wGetTxs().filter(t => aptIdsT.has(t.pid));
+  const garIdsT = new Set(PROPS_W.filter(p=>p.g).map(p=>p.id));
+  let txs   = wGetTxs().filter(t => !garIdsT.has(t.pid));
   if (wFilter !== 'all') txs = txs.filter(t=>t.pid===wFilter);
   txs = [...txs].sort((a,b)=>b.date.localeCompare(a.date));
 
@@ -2167,7 +2349,6 @@ function wRenderWertenachweis(pid, yr) {
     const p = d.split('-');
     return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : d;
   };
-
   const groupByCat = arr => arr.reduce((m, t) => {
     if (!m[t.cat]) m[t.cat] = [];
     m[t.cat].push(t);
@@ -2178,47 +2359,42 @@ function wRenderWertenachweis(pid, yr) {
   const expTxs = txs.filter(t => t.type === 'expense').sort((a,b) => a.date.localeCompare(b.date));
   const incByCat = groupByCat(incTxs);
   const expByCat = groupByCat(expTxs);
-
   const wnId = 'wn_' + pid;
 
   let h = `<div style="border-top:.5px solid var(--gray5)">
     <button onclick="wToggleWN('${wnId}')"
       style="width:100%;padding:11px 16px;background:none;border:none;display:flex;justify-content:space-between;align-items:center;cursor:pointer;font-family:inherit;color:var(--blue);font-size:13px;font-weight:600">
       <span>📋 Wertenachweis</span>
-      <span id="wn_chev_${pid}" style="font-size:11px;color:var(--gray1)">▼ anzeigen</span>
+      <span id="wn_chev_${pid}" style="font-size:11px;color:var(--gray1)">&#9660; anzeigen</span>
     </button>
     <div id="${wnId}" style="display:none">`;
 
-  // ── Einnahmen ──
   Object.entries(incByCat).forEach(([cat, catTxs]) => {
     const total = catTxs.reduce((s, t) => s + t.amt, 0);
-    h += `<div style="background:#F0FDF4;padding:7px 16px 5px;font-size:11px;font-weight:700;color:#166534;text-transform:uppercase;letter-spacing:.5px;border-top:.5px solid var(--gray5)">${cat} · ${catTxs.length} Buchungen</div>`;
+    h += `<div style="background:#F0FDF4;padding:7px 16px 5px;font-size:11px;font-weight:700;color:#166534;text-transform:uppercase;letter-spacing:.5px;border-top:.5px solid var(--gray5)">${cat} &middot; ${catTxs.length} Buchungen</div>`;
     catTxs.forEach(t => {
-      const desc = t.desc ? (t.desc.length > 32 ? t.desc.substring(0, 32) + '\u2026' : t.desc) : '\u2014';
+      const desc = t.desc ? (t.desc.length > 32 ? t.desc.substring(0,32)+'&hellip;' : t.desc) : '&mdash;';
       h += `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 16px 5px 20px;border-bottom:.5px solid var(--gray6);gap:8px">
-        <span style="font-size:12px;color:var(--gray1);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${fmtDate(t.date)} \u00b7 ${desc}</span>
+        <span style="font-size:12px;color:var(--gray1);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${fmtDate(t.date)} &middot; ${desc}</span>
         <span style="font-size:12px;color:var(--green);font-weight:500;white-space:nowrap">+${wEur(t.amt)}</span>
       </div>`;
     });
     h += `<div style="display:flex;justify-content:space-between;padding:6px 16px;font-size:12px;font-weight:700;background:#DCFCE7;border-top:.5px solid var(--gray5)">
-      <span>Summe ${cat}</span><span style="color:var(--green)">+${wEur(total)}</span>
-    </div>`;
+      <span>Summe ${cat}</span><span style="color:var(--green)">+${wEur(total)}</span></div>`;
   });
 
-  // ── Ausgaben ──
   Object.entries(expByCat).forEach(([cat, catTxs]) => {
     const total = catTxs.reduce((s, t) => s + t.amt, 0);
-    h += `<div style="background:#FFF5F5;padding:7px 16px 5px;font-size:11px;font-weight:700;color:#991B1B;text-transform:uppercase;letter-spacing:.5px;border-top:.5px solid var(--gray5)">${cat} · ${catTxs.length} Buchungen</div>`;
+    h += `<div style="background:#FFF5F5;padding:7px 16px 5px;font-size:11px;font-weight:700;color:#991B1B;text-transform:uppercase;letter-spacing:.5px;border-top:.5px solid var(--gray5)">${cat} &middot; ${catTxs.length} Buchungen</div>`;
     catTxs.forEach(t => {
-      const desc = t.desc ? (t.desc.length > 32 ? t.desc.substring(0, 32) + '\u2026' : t.desc) : '\u2014';
+      const desc = t.desc ? (t.desc.length > 32 ? t.desc.substring(0,32)+'&hellip;' : t.desc) : '&mdash;';
       h += `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 16px 5px 20px;border-bottom:.5px solid var(--gray6);gap:8px">
-        <span style="font-size:12px;color:var(--gray1);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${fmtDate(t.date)} \u00b7 ${desc}</span>
-        <span style="font-size:12px;color:var(--red);font-weight:500;white-space:nowrap">\u2212${wEur(t.amt)}</span>
+        <span style="font-size:12px;color:var(--gray1);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${fmtDate(t.date)} &middot; ${desc}</span>
+        <span style="font-size:12px;color:var(--red);font-weight:500;white-space:nowrap">&minus;${wEur(t.amt)}</span>
       </div>`;
     });
     h += `<div style="display:flex;justify-content:space-between;padding:6px 16px;font-size:12px;font-weight:700;background:#FFE4E4;border-top:.5px solid var(--gray5)">
-      <span>Summe ${cat}</span><span style="color:var(--red)">\u2212${wEur(total)}</span>
-    </div>`;
+      <span>Summe ${cat}</span><span style="color:var(--red)">&minus;${wEur(total)}</span></div>`;
   });
 
   h += `</div></div>`;
@@ -2232,7 +2408,7 @@ function wToggleWN(id) {
   if (!el) return;
   const open = el.style.display === 'none';
   el.style.display = open ? 'block' : 'none';
-  if (chev) chev.textContent = open ? '\u25b2 ausblenden' : '\u25bc anzeigen';
+  if (chev) chev.textContent = open ? '&#9650; ausblenden' : '&#9660; anzeigen';
 }
 
 // ─── Anlage V (Tax) ───
@@ -2501,10 +2677,8 @@ function wDoExport() {
     txt += `  Einnahmen:      ${wEur(ps.inc).padStart(12)}\n`;
     txt += `  Werbungskosten: ${('-'+wEur(ps.exp)).padStart(12)}\n`;
     txt += `  ► ERGEBNIS:     ${((ps.res>=0?'+':'')+wEur(ps.res)).padStart(12)}\n`;
-
     txt += `\n  WERTENACHWEIS\n${'─'.repeat(52)}\n`;
 
-    // Income categories with individual transactions
     if (Object.keys(ibc).length) {
       txt += `  EINNAHMEN\n`;
       Object.entries(ibc).forEach(([cat, catTxs]) => {
@@ -2517,8 +2691,6 @@ function wDoExport() {
         txt += `    ${'Summe '+cat}`.padEnd(52)+` +${wEur(total)}\n\n`;
       });
     }
-
-    // Expense categories with individual transactions
     if (Object.keys(ebc).length) {
       txt += `  WERBUNGSKOSTEN\n`;
       Object.entries(ebc).forEach(([cat, catTxs]) => {
@@ -2543,6 +2715,457 @@ function wDoExport() {
 }
 
 // ════════════════════════════════════════════
+//  ELSTER-ZUORDNUNG EXPORT
+// ════════════════════════════════════════════
+
+function doElsterExport() {
+  const yr = currentYear;
+  const eur = n => new Intl.NumberFormat('de-DE',{minimumFractionDigits:2,maximumFractionDigits:2}).format(n);
+  const line = (z, label, val) => `  Zeile ${String(z).padEnd(4)} ${label.padEnd(40)} ${eur(val).padStart(12)} €\n`;
+  const sep = () => '─'.repeat(72) + '\n';
+  const head = t => `\n${'═'.repeat(72)}\n  ${t}\n${'═'.repeat(72)}\n`;
+  const docLine = d => {
+    const amtStr = typeof d.amt === 'number' ? ` · ${eur(d.amt)} €` : '';
+    const dateStr = d.date || (d.createdAt ? d.createdAt.substring(0,10) : '');
+    return `    ${dateStr}  ${d.title}${amtStr}\n`;
+  };
+
+  const allDocs = getDocs().filter(d => d.year === yr);
+  const allTxs = wGetTxs().filter(t => t.date.startsWith(yr+''));
+
+  let txt = `${'═'.repeat(72)}\n`;
+  txt += `  ELSTER-ZUORDNUNG · EINKOMMENSTEUERERKLÄRUNG ${yr}\n`;
+  txt += `  ─────────────────────────────────────────────\n`;
+  txt += `  Steuerpflichtiger:  Bernd Gansbacher\n`;
+  txt += `  Wohnort:            München\n`;
+  txt += `  Erstellt am:        ${new Date().toLocaleDateString('de-DE')}\n`;
+  txt += `${'═'.repeat(72)}\n`;
+  txt += `\n  Diese Übersicht ordnet alle erfassten Beträge den offiziellen\n  ELSTER-Formularzeilen zu (Stand: Formulare ${yr}).\n`;
+  txt += `  Zeilen-Nr. können sich gegenüber dem Vorjahr um 1–2 verschieben.\n\n`;
+  txt += `  INHALT:\n`;
+  txt += `  1. Anlage V  – Einkünfte aus Vermietung (je Objekt)\n`;
+  txt += `  2. Anlage KAP – Einkünfte aus Kapitalvermögen\n`;
+  txt += `  3. Anlage R  – Renten (Inland)\n`;
+  txt += `  4. Anlage R-AUS – Renten (Ausland)\n`;
+  txt += `  5. Anlage AUS – Ausländische Einkünfte\n`;
+  txt += `  6. Anlage Vorsorgeaufwand – Versicherungen\n`;
+  txt += `  7. Sonderausgaben\n`;
+  txt += `  8. Werbungskosten (allgemein)\n`;
+  txt += `  9. Hauptvordruck – Zusammenfassung\n`;
+
+  // ── ANLAGE V — one per property ──
+  const aptProps = PROPS_W.filter(p => !p.g);
+  const garProps = PROPS_W.filter(p => p.g);
+  const allProps = [...aptProps, ...garProps];
+
+  // Category → Zeile mapping for Anlage V
+  const catZeile = {
+    'Kaltmiete': { z: 9, label: 'Mieteinnahmen Wohnung', section: 'Einnahmen' },
+    'Nebenkosten (Vorauszahlung)': { z: 11, label: 'Umlagen / Nebenkosten (Vorauszahlungen)', section: 'Einnahmen' },
+    'Nachzahlung Nebenkosten': { z: 11, label: 'Umlagen / Nebenkosten (Nachzahlung)', section: 'Einnahmen' },
+    'Kaution (Eingang)': { z: 14, label: 'Sonstige Einnahmen (Kaution)', section: 'Einnahmen' },
+    'Sonstige Einnahmen': { z: 14, label: 'Sonstige Einnahmen', section: 'Einnahmen' },
+    'Schuldzinsen': { z: 39, label: 'Schuldzinsen / Finanzierungskosten', section: 'WK' },
+    'Grundsteuer': { z: 42, label: 'Grundsteuer', section: 'WK' },
+    'AfA / Abschreibung': { z: 33, label: 'AfA (Absetzung für Abnutzung)', section: 'WK' },
+    'Reparaturen / Instandhaltung': { z: 37, label: 'Erhaltungsaufwendungen', section: 'WK' },
+    'Renovierung': { z: 37, label: 'Erhaltungsaufwendungen (Renovierung)', section: 'WK' },
+    'Gebäudeversicherung': { z: 46, label: 'Sonstige WK: Gebäudeversicherung', section: 'WK' },
+    'Hausverwaltung': { z: 46, label: 'Sonstige WK: Hausverwaltung / WEG', section: 'WK' },
+    'Maklergebühren': { z: 46, label: 'Sonstige WK: Maklergebühren', section: 'WK' },
+    'Steuerberatung': { z: 46, label: 'Sonstige WK: Steuerberatung (V&V-Anteil)', section: 'WK' },
+    'Hausmeister / Reinigung': { z: 46, label: 'Sonstige WK: Hausmeister / Reinigung', section: 'WK' },
+    'Sonstige Werbungskosten': { z: 46, label: 'Sonstige Werbungskosten', section: 'WK' },
+  };
+
+  let totalVResult = 0;
+  let hasAnlageV = false;
+  let anlageVCount = 0;
+
+  allProps.forEach(p => {
+    const ps = wPropStats(p.id, yr);
+    if (!ps.n) return;
+    hasAnlageV = true;
+    anlageVCount++;
+    const ibc = wIncByCat(p.id, yr);
+    const ebc = wExpByCat(p.id, yr);
+    const pTxs = allTxs.filter(t => t.pid === p.id);
+    const tenantTag = p.tenant ? ` · Mieter: ${p.tenant}` : '';
+    const propType = p.g ? 'Garage/Stellplatz' : 'Wohnung';
+
+    txt += head(`ANLAGE V Nr. ${anlageVCount} · ${p.name}`);
+    txt += `  Objektart:     ${propType}\n`;
+    txt += `  Lage:          München${tenantTag}\n`;
+    txt += `  Buchungen:     ${ps.n} Positionen\n`;
+    txt += sep();
+
+    // ── Income lines with individual transactions ──
+    txt += '\n  A. EINNAHMEN\n' + sep();
+    let incTotal = 0;
+
+    // Group income transactions by category
+    const incTxs = pTxs.filter(t => t.type === 'income');
+    const incByCat = {};
+    incTxs.forEach(t => {
+      if (!incByCat[t.cat]) incByCat[t.cat] = [];
+      incByCat[t.cat].push(t);
+    });
+
+    Object.entries(ibc).forEach(([cat, amt]) => {
+      const mapping = catZeile[cat] || { z: 14, label: 'Sonstige Einnahmen' };
+      txt += line(mapping.z, mapping.label, amt);
+      // List individual transactions
+      if (incByCat[cat]) {
+        incByCat[cat].sort((a,b) => a.date.localeCompare(b.date)).forEach(t => {
+          txt += `           ${t.date}  ${(t.name||t.desc||'').substring(0,45).padEnd(45)} ${eur(t.amt).padStart(10)} €\n`;
+        });
+      }
+      incTotal += amt;
+    });
+    if (!Object.keys(ibc).length) txt += '    (keine Einnahmen)\n';
+    txt += sep();
+    txt += `  Summe Einnahmen:${' '.repeat(28)} ${eur(incTotal).padStart(12)} €\n\n`;
+
+    // ── Expense lines grouped by Zeile with individual transactions ──
+    txt += '  B. WERBUNGSKOSTEN (§9 EStG)\n' + sep();
+    let expTotal = 0;
+
+    // Group expense transactions by category
+    const expTxs = pTxs.filter(t => t.type === 'expense');
+    const expByCat = {};
+    expTxs.forEach(t => {
+      if (!expByCat[t.cat]) expByCat[t.cat] = [];
+      expByCat[t.cat].push(t);
+    });
+
+    const zeileGroups = {};
+    Object.entries(ebc).forEach(([cat, amt]) => {
+      const mapping = catZeile[cat] || { z: 46, label: 'Sonstige Werbungskosten' };
+      const key = mapping.z + ':' + mapping.label;
+      if (!zeileGroups[key]) zeileGroups[key] = { z: mapping.z, label: mapping.label, amt: 0, details: [], txs: [] };
+      zeileGroups[key].amt += amt;
+      zeileGroups[key].details.push({ cat, amt });
+      if (expByCat[cat]) zeileGroups[key].txs.push(...expByCat[cat]);
+      expTotal += amt;
+    });
+
+    Object.values(zeileGroups).sort((a,b) => a.z - b.z).forEach(g => {
+      txt += line(g.z, g.label, g.amt);
+      if (g.details.length > 1) {
+        g.details.forEach(d => {
+          txt += `           └ ${d.cat.padEnd(40)} ${eur(d.amt).padStart(10)} €\n`;
+        });
+      }
+      // List individual transactions
+      g.txs.sort((a,b) => a.date.localeCompare(b.date)).forEach(t => {
+        txt += `           ${t.date}  ${(t.name||t.desc||'').substring(0,45).padEnd(45)} ${eur(t.amt).padStart(10)} €\n`;
+      });
+    });
+    if (!Object.keys(ebc).length) txt += '    (keine Werbungskosten)\n';
+    txt += sep();
+    txt += `  Summe Werbungskosten:${' '.repeat(23)} ${eur(expTotal).padStart(12)} €\n\n`;
+
+    // ── Result ──
+    txt += sep();
+    const resSign = ps.res >= 0 ? '+' : '';
+    txt += `  ► ERGEBNIS Anlage V (Zeile 23):${' '.repeat(13)} ${(resSign + eur(ps.res)).padStart(12)} €\n`;
+    txt += `    → In den Hauptvordruck übertragen\n`;
+    totalVResult += ps.res;
+  });
+
+  if (hasAnlageV) {
+    txt += head(`ANLAGE V · GESAMTERGEBNIS (${anlageVCount} Objekte)`);
+    const sign = totalVResult >= 0 ? '+' : '';
+    txt += `  Einkünfte aus Vermietung und Verpachtung (§21 EStG)\n`;
+    txt += `  Gesamtergebnis:${' '.repeat(27)} ${(sign + eur(totalVResult)).padStart(14)} €\n`;
+    txt += `  → Hauptvordruck Zeile 21 übertragen\n`;
+  }
+
+  // ── ANLAGE KAP ──
+  const kapDocs = allDocs.filter(d => d.sectionId === 'deutsche_bank');
+  const kapJSB = kapDocs.filter(d => d.typeId === 'jahressteuerbescheinigung');
+  const kapDepot = kapDocs.filter(d => d.typeId === 'jahres_depot');
+  const kapZinsen = kapDocs.filter(d => d.typeId === 'zinsen');
+  const kapSonstige = kapDocs.filter(d => !['jahressteuerbescheinigung','jahres_depot','zinsen'].includes(d.typeId));
+  if (kapDocs.length) {
+    txt += head('ANLAGE KAP · Einkünfte aus Kapitalvermögen');
+    txt += `  ${kapDocs.length} Beleg(e) erfasst\n`;
+    txt += sep();
+    txt += '  RELEVANTE ZEILEN:\n';
+    txt += '  Zeile 7    Inländische Kapitalerträge\n';
+    txt += '             (lt. Jahressteuerbescheinigung der Bank)\n';
+    txt += '  Zeile 8    Ersatzbemessungsgrundlage\n';
+    txt += '  Zeile 14   Ausländische Kapitalerträge\n';
+    txt += '  Zeile 15   In Zeile 14 enthaltene Gewinne aus Aktienveräußerungen\n';
+    txt += '  Zeile 18   Anrechenbare ausländische Steuern\n';
+    txt += '  Zeile 37   Einbehaltene Kapitalertragsteuer (inländisch)\n';
+    txt += '  Zeile 38   Einbehaltener Solidaritätszuschlag\n';
+    txt += '  Zeile 39   Einbehaltene Kirchensteuer\n';
+    txt += sep();
+    if (kapJSB.length) {
+      txt += '\n  Jahressteuerbescheinigungen:\n';
+      kapJSB.forEach(d => { txt += docLine(d); });
+      txt += '  → WICHTIG: Alle Werte aus der Jahressteuerbescheinigung in\n';
+      txt += '    die entsprechenden Zeilen der Anlage KAP übertragen.\n\n';
+    }
+    if (kapDepot.length) {
+      txt += '  Depot-Übersichten:\n';
+      kapDepot.forEach(d => { txt += docLine(d); });
+      txt += '\n';
+    }
+    if (kapZinsen.length) {
+      txt += '  Zinsbescheinigungen:\n';
+      kapZinsen.forEach(d => { txt += docLine(d); });
+      txt += '\n';
+    }
+    if (kapSonstige.length) {
+      txt += '  Sonstige Bank-Belege:\n';
+      kapSonstige.forEach(d => { txt += docLine(d); });
+      txt += '\n';
+    }
+  }
+
+  // ── ANLAGE R (Inland) ──
+  const renteDocs = allDocs.filter(d => d.sectionId === 'deutsche_rente');
+  if (renteDocs.length) {
+    txt += head('ANLAGE R · Renten (Inland)');
+    txt += `  ${renteDocs.length} Beleg(e) erfasst\n`;
+    txt += sep();
+    txt += '  RELEVANTE ZEILEN:\n';
+    txt += '  Zeile 4    Rente (Bruttobetrag) aus gesetzlicher Rentenversicherung\n';
+    txt += '  Zeile 5    Beginn der Rente (Datum)\n';
+    txt += '  Zeile 6    Voraussichtliche Laufzeit / lebenslang\n';
+    txt += '  Zeile 11   Beiträge zur Krankenversicherung\n';
+    txt += '  Zeile 12   Beiträge zur Pflegeversicherung\n';
+    txt += sep();
+    txt += '\n  Belege:\n';
+    renteDocs.forEach(d => { txt += docLine(d); });
+    txt += '  → Bruttobetrag aus Rentenanpassungsmitteilung übernehmen\n\n';
+  }
+
+  // ── ANLAGE R-AUS ──
+  const oePenDocs = allDocs.filter(d => d.sectionId === 'oesterreichische_pension');
+  if (oePenDocs.length) {
+    txt += head('ANLAGE R-AUS · Renten aus dem Ausland');
+    txt += `  ${oePenDocs.length} Beleg(e) erfasst\n`;
+    txt += `  Staat: Österreich\n`;
+    txt += sep();
+    txt += '  RELEVANTE ZEILEN:\n';
+    txt += '  Zeile 4    Ausländische Rente (Bruttobetrag in EUR)\n';
+    txt += '  Zeile 5    Beginn der Rente (Datum)\n';
+    txt += '  Zeile 6    Staat der Rente: Österreich\n';
+    txt += '  Zeile 11   Einbehaltene ausländische Steuer\n';
+    txt += sep();
+    txt += '\n  Belege:\n';
+    oePenDocs.forEach(d => { txt += docLine(d); });
+    txt += '  → Betrag aus PVA-Leistungsmitteilung übernehmen\n';
+    txt += '  → DBA Österreich: Besteuerungsrecht liegt bei Deutschland\n\n';
+  }
+
+  // ── ANLAGE AUS ──
+  const usaDocs = allDocs.filter(d => d.sectionId === 'usa');
+  const tiaaDocs = usaDocs.filter(d => d.typeId === 'tiaa');
+  const ssaDocs = usaDocs.filter(d => d.typeId === 'social_security');
+  if (usaDocs.length) {
+    txt += head('ANLAGE AUS · Ausländische Einkünfte (USA)');
+    txt += `  ${usaDocs.length} Beleg(e) erfasst\n`;
+    txt += `  Staat: Vereinigte Staaten von Amerika\n`;
+    txt += sep();
+    txt += '  RELEVANTE ZEILEN:\n';
+    txt += '  Zeile 4    Staat: USA\n';
+    txt += '  Zeile 5    Einkunftsart: Sonstige Einkünfte (§22 EStG)\n';
+    txt += '  Zeile 6    Ausländische Einkünfte (Bruttobetrag in EUR)\n';
+    txt += '             Umrechnung USD → EUR zum Jahresschnitt-Kurs\n';
+    txt += '  Zeile 7    Im Ausland gezahlte Steuern (Federal Tax)\n';
+    txt += '  Zeile 8    Davon anrechenbar nach DBA (Art. 18 DBA USA)\n';
+    txt += sep();
+    if (tiaaDocs.length) {
+      txt += '\n  TIAA Distribution (Form 1099-R):\n';
+      tiaaDocs.forEach(d => { txt += docLine(d); });
+      txt += '  → Gross Distribution in EUR umrechnen → Zeile 6\n';
+      txt += '  → Federal Tax Withheld in EUR → Zeile 7\n\n';
+    }
+    if (ssaDocs.length) {
+      txt += '  Social Security (Form SSA-1099):\n';
+      ssaDocs.forEach(d => { txt += docLine(d); });
+      txt += '  → Net Benefit in EUR umrechnen → Zeile 6\n';
+      txt += '  → DBA Art. 18A: Besteuerung im Wohnsitzstaat (DE)\n\n';
+    }
+  }
+
+  // ── ANLAGE VORSORGEAUFWAND ──
+  const kvDocs = allDocs.filter(d => d.sectionId === 'hallesche_kv');
+  const wkVersDocs = allDocs.filter(d => d.sectionId === 'werbungskosten' && d.typeId === 'werbungskosten_versicherung');
+  if (kvDocs.length || wkVersDocs.length) {
+    txt += head('ANLAGE VORSORGEAUFWAND · Versicherungsbeiträge');
+    txt += `  ${kvDocs.length + wkVersDocs.length} Beleg(e) erfasst\n`;
+    txt += sep();
+    txt += '  RELEVANTE ZEILEN:\n';
+    txt += '  Zeile 12   Private Krankenversicherung (Basisbeiträge)\n';
+    txt += '             → Betrag aus Hallesche-Bescheinigung "steuerlich absetzbar"\n';
+    txt += '  Zeile 16   Wahlleistungen / Zusatzversicherung (PKV)\n';
+    txt += '             → Beitragsanteil Wahlleistungen der Hallesche\n';
+    txt += '  Zeile 18   Pflegeversicherung\n';
+    txt += '             → Pflegeversicherungs-Anteil aus Hallesche-Bescheinigung\n';
+    txt += '  Zeile 27   Haftpflichtversicherung (privat)\n';
+    txt += '  Zeile 28   Unfallversicherung\n';
+    txt += sep();
+    if (kvDocs.length) {
+      txt += '\n  Hallesche KV Belege:\n';
+      kvDocs.forEach(d => { txt += docLine(d); });
+    }
+    if (wkVersDocs.length) {
+      txt += '\n  Weitere Versicherungsbelege:\n';
+      wkVersDocs.forEach(d => { txt += docLine(d); });
+    }
+    txt += '\n  → WICHTIG: Beträge aus der Hallesche-Jahresbescheinigung\n';
+    txt += '    "Steuerlich absetzbare Beiträge" in die passenden Zeilen eintragen\n\n';
+  }
+
+  // ── ANLAGE SONDERAUSGABEN ──
+  const spendenDocs = allDocs.filter(d => d.sectionId === 'spenden');
+  const kircheDocs = allDocs.filter(d => d.sectionId === 'kirche');
+  const sondDocs = allDocs.filter(d => d.sectionId === 'sonderausgaben');
+  const sondSteuerber = sondDocs.filter(d => d.typeId === 'sonderausgaben_steuerberatung');
+  const sondAllg = sondDocs.filter(d => d.typeId !== 'sonderausgaben_steuerberatung');
+  if (spendenDocs.length || kircheDocs.length || sondDocs.length) {
+    txt += head('SONDERAUSGABEN (§10, §10b EStG)');
+    const totalSond = spendenDocs.length + kircheDocs.length + sondDocs.length;
+    txt += `  ${totalSond} Beleg(e) erfasst\n`;
+    txt += sep();
+    if (kircheDocs.length) {
+      txt += '\n  KIRCHENSTEUER (Hauptvordruck Zeile 4 der Anlage Sonderausgaben):\n';
+      kircheDocs.forEach(d => { txt += docLine(d); });
+      txt += '  → Gezahlte Kirchensteuer abzgl. erstatteter Kirchensteuer\n\n';
+    }
+    if (spendenDocs.length) {
+      txt += '  SPENDEN / ZUWENDUNGEN (Anlage Sonderausgaben Zeile 5):\n';
+      spendenDocs.forEach(d => { txt += docLine(d); });
+      txt += '  → Zuwendungsbestätigungen beifügen\n\n';
+    }
+    if (sondSteuerber.length) {
+      txt += '  STEUERBERATUNGSKOSTEN:\n';
+      sondSteuerber.forEach(d => { txt += docLine(d); });
+      txt += '  → HINWEIS: Seit 2006 NICHT mehr als Sonderausgabe absetzbar.\n';
+      txt += '    Steuerberatungskosten nur noch als Werbungskosten der\n';
+      txt += '    jeweiligen Einkunftsart (z.B. Anlage V Zeile 46 für V&V).\n\n';
+    }
+    if (sondAllg.length) {
+      txt += '  SONSTIGE SONDERAUSGABEN:\n';
+      sondAllg.forEach(d => { txt += docLine(d); });
+      txt += '\n';
+    }
+  }
+
+  // ── WERBUNGSKOSTEN (allgemein) ──
+  const wkDocs = allDocs.filter(d => d.sectionId === 'werbungskosten' && d.typeId !== 'werbungskosten_versicherung');
+  if (wkDocs.length) {
+    txt += head('WERBUNGSKOSTEN ALLGEMEIN (Anlage N)');
+    txt += `  ${wkDocs.length} Beleg(e) erfasst\n`;
+    txt += sep();
+    txt += '  RELEVANTE ZEILEN (Anlage N):\n';
+    txt += '  Zeile 31   Wege zwischen Wohnung und Arbeitsstätte\n';
+    txt += '  Zeile 42   Arbeitsmittel\n';
+    txt += '  Zeile 46   Fortbildungskosten\n';
+    txt += '  Zeile 47   Sonstige Werbungskosten\n';
+    txt += sep();
+    txt += '\n  Belege:\n';
+    wkDocs.forEach(d => { txt += docLine(d); });
+    txt += '\n';
+  }
+
+  // ── LOHNSTEUER ──
+  const lohnDocs = allDocs.filter(d => d.sectionId === 'lohnsteuer');
+  if (lohnDocs.length) {
+    txt += head('ANLAGE N · Einkünfte aus nichtselbst. Arbeit');
+    txt += `  ${lohnDocs.length} Beleg(e) erfasst\n`;
+    txt += sep();
+    txt += '  RELEVANTE ZEILEN:\n';
+    txt += '  Zeile 6    Bruttoarbeitslohn (lt. Lohnsteuerbescheinigung)\n';
+    txt += '  Zeile 7    Einbehaltene Lohnsteuer\n';
+    txt += '  Zeile 8    Solidaritätszuschlag\n';
+    txt += '  Zeile 9    Kirchensteuer\n';
+    txt += sep();
+    txt += '\n  Belege:\n';
+    lohnDocs.forEach(d => { txt += docLine(d); });
+    txt += '  → Daten werden i.d.R. elektronisch vom Arbeitgeber übermittelt\n\n';
+  }
+
+  // ── EINKÜNFTE AUS SELBST. TÄTIGKEIT ──
+  const einkDocs = allDocs.filter(d => d.sectionId === 'einkuenfte');
+  if (einkDocs.length) {
+    txt += head('ANLAGE S · Einkünfte aus selbständiger Tätigkeit');
+    txt += `  ${einkDocs.length} Beleg(e) erfasst\n`;
+    txt += sep();
+    txt += '  RELEVANTE ZEILEN:\n';
+    txt += '  Zeile 4    Art der Tätigkeit\n';
+    txt += '  Zeile 5    Gewinn (lt. Gewinnermittlung)\n';
+    txt += sep();
+    txt += '\n  Belege:\n';
+    einkDocs.forEach(d => { txt += docLine(d); });
+    txt += '\n';
+  }
+
+  // ── AMERICAN EXPRESS ──
+  const aeDocs = allDocs.filter(d => d.sectionId === 'american_express');
+  const aeBew = aeDocs.filter(d => d.typeId === 'ae_bewirtung');
+  if (aeBew.length) {
+    txt += head('BEWIRTUNGSKOSTEN (70% absetzbar)');
+    aeBew.forEach(d => { txt += docLine(d); });
+    txt += '  → In Anlage S oder Anlage N als Betriebsausgaben/WK eintragen\n';
+    txt += '  → Nur 70% der Bewirtungskosten sind absetzbar\n\n';
+  }
+
+  // ── HAUPTVORDRUCK ZUSAMMENFASSUNG ──
+  txt += head(`HAUPTVORDRUCK · ZUSAMMENFASSUNG ${yr}`);
+  txt += '  Übertragung der Ergebnisse in den Hauptvordruck:\n';
+  txt += sep();
+  if (hasAnlageV) {
+    const sign = totalVResult >= 0 ? '+' : '';
+    txt += `  Zeile 21   Einkünfte aus V&V (${anlageVCount} Anlagen V)  ${(sign + eur(totalVResult)).padStart(14)} €\n`;
+  }
+  txt += '  Zeile 14   Einkünfte aus nichtselbst. Arbeit  → lt. Anlage N\n';
+  txt += '  Zeile 17   Einkünfte aus Kapitalvermögen      → lt. Anlage KAP\n';
+  txt += '  Zeile 21   Einkünfte aus V&V                  → lt. Anlage V\n';
+  txt += '  Zeile 22   Sonstige Einkünfte                 → lt. Anlage R / AUS\n';
+  txt += sep();
+  txt += '\n  ANLAGEN-CHECKLISTE:\n';
+  if (hasAnlageV)      txt += `  ☐ Anlage V           × ${anlageVCount} (je Objekt)\n`;
+  if (kapDocs.length)  txt += '  ☐ Anlage KAP         × 1\n';
+  if (renteDocs.length) txt += '  ☐ Anlage R           × 1\n';
+  if (oePenDocs.length) txt += '  ☐ Anlage R-AUS       × 1\n';
+  if (usaDocs.length)  txt += '  ☐ Anlage AUS         × 1\n';
+  if (kvDocs.length || wkVersDocs.length) txt += '  ☐ Anlage Vorsorge    × 1\n';
+  if (spendenDocs.length || kircheDocs.length) txt += '  ☐ Anlage Sonderausg. × 1\n';
+  if (lohnDocs.length) txt += '  ☐ Anlage N           × 1\n';
+  if (einkDocs.length) txt += '  ☐ Anlage S           × 1\n';
+  txt += '\n';
+
+  // ── HINWEISE ──
+  txt += head('HINWEISE');
+  txt += `  • Zeilen-Nr. beziehen sich auf Formulare ${yr}.\n`;
+  txt += '    Im aktuellen ELSTER-Formular können sich Zeilen um 1-2 verschieben.\n';
+  txt += '  • Anlage V: Für jedes Objekt ein SEPARATES Formular ausfüllen.\n';
+  txt += '  • Anlage KAP: Alle Werte aus der Jahressteuerbescheinigung\n';
+  txt += '    der Bank in die jeweiligen Zeilen eintragen.\n';
+  txt += '  • Steuerberatungskosten sind seit 2006 KEINE Sonderausgabe mehr,\n';
+  txt += '    sondern Werbungskosten der jeweiligen Einkunftsart.\n';
+  txt += '  • DBA Österreich: Pensionen werden in Deutschland besteuert.\n';
+  txt += '  • DBA USA: TIAA-Renten und Social Security werden in DE besteuert,\n';
+  txt += '    US-Quellensteuer ist auf die deutsche Steuer anrechenbar.\n';
+  txt += '  • USD-Beträge zum Jahresdurchschnittskurs der EZB umrechnen.\n';
+  txt += `\n${'═'.repeat(72)}\n`;
+
+  const blob = new Blob([txt], {type:'text/plain;charset=utf-8'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `ELSTER_Zuordnung_${yr}_Gansbacher.txt`;
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast('📥 ELSTER-Zuordnung heruntergeladen');
+}
+
+// ════════════════════════════════════════════
 //  BANK-IMPORT
 // ════════════════════════════════════════════
 
@@ -2556,6 +3179,10 @@ const PROP_ALIASES = [
   { pattern: /\bflache?\b|anke\s+flach/i,                                  propId:'frundsberger',   propName:'Frundsbergstr. (Flach)',            sectionId:'wohnungen', typeId:'wohnungen_allgemein' },
   { pattern: /\bstarosta\b/i,                                              propId:'gar_isartal',    propName:'Garage Isartalstr. (Starosta)',     sectionId:'garagen',   typeId:'garage_isartalstrasse' },
   { pattern: /\bbaumgartner\b|muller.baumgartner/i,                        propId:'gar_elektra',    propName:'Garage Elektrastr. (Baumgartner)',  sectionId:'garagen',   typeId:'garage_elektrastrasse' },
+  // ── Property managers / insurers / professionals ──
+  { pattern: /bayerische\s+immobilien\s+management|bayr?\.?\s*immobi/i,   propId:'gar_elektra',    propName:'Garage Elektrastr. (Bayr. Immo.)',  sectionId:'garagen',   typeId:'garage_elektrastrasse' },
+  { pattern: /\bitzehoer\b/i,                                              propId:'isartal_studio', propName:'Isartalstr. 28 Whg 15 (Itzehoer)',  sectionId:'wohnungen', typeId:'wohnungen_allgemein' },
+  { pattern: /\bwalz\b.*notar|notar.*\bwalz\b|dr\.?\s*robert\s+walz/i,   propId:'gar_isartal',    propName:'Garage Isartalstr. (Walz Notar)',   sectionId:'garagen',   typeId:'garage_isartalstrasse' },
   // ── Garages by name (before address patterns) ──
   { pattern: /garage\s+sarnthein|sarnthein\s+garage/i,             propId:'gar_sarnthein',  propName:'Garage Sarnthein',  sectionId:'garagen',   typeId:'garage_sarnthein'   },
   { pattern: /garage\s+elektra(str(asse)?)?|elektra(str(asse)?)?\s+garage/i,  propId:'gar_elektra', propName:'Garage Elektrastr.', sectionId:'garagen', typeId:'garage_elektrastrasse' },
@@ -2575,6 +3202,10 @@ const PROP_ALIASES = [
 const TAX_RULES = [
   // ── Mieter (Tenant names) — classified as wohnungen even without property keywords ──
   { pattern: /\blevina?\b|natali[a]?\s+levin|maksim\s+levin|gelmi|pantos|marina\s+pantos|\bflach[e]?\b|anke\s+flach|starosta|muller.baumgartner|baumgartner/i, sectionId:'wohnungen', typeId:'wohnungen_allgemein', label:'Mieteinnahme', needsReview:false },
+  // ── Known property-specific payees ──
+  { pattern: /bayerische\s+immobilien\s+management|bayr?\.?\s*immobi/i,  sectionId:'garagen',   typeId:'garage_elektrastrasse', label:'Hausverwaltung',           needsReview:false },
+  { pattern: /\bitzehoer\b/i,                                             sectionId:'wohnungen', typeId:'wohnungen_allgemein',   label:'Gebäudeversicherung',      needsReview:false },
+  { pattern: /\bwalz\b.*notar|notar.*\bwalz\b|dr\.?\s*robert\s+walz/i,  sectionId:'garagen',   typeId:'garage_isartalstrasse', label:'Notar/Sonstige Kosten',    needsReview:false },
   // ── Mieteinnahmen & Immobilien ── (confirmed tax relevant)
   { pattern: /\bmiete\b|kaltmiete|mieteinnahme|miete\s+whg|miete\s+\d|miete\s+[a-z]/i,              sectionId:'wohnungen',       typeId:'wohnungen_allgemein',       label:'Mieteinnahme',                needsReview:false },
   { pattern: /grundsteuer/i,                                                                            sectionId:'wohnungen',       typeId:'wohnungen_allgemein',       label:'Grundsteuer',                 needsReview:false },
@@ -2586,7 +3217,7 @@ const TAX_RULES = [
   { pattern: /zinsen|dividenden|dividende|ertraege|ertrage|kapitalertrag|depot|dividend|interest|securities|custody.?fee/i, sectionId:'deutsche_bank', typeId:'jahressteuerbescheinigung', label:'Kapitalertrag/Zinsen', needsReview:false },
   // ── Versicherungen ──
   { pattern: /krankenversicherung|krankenkasse|hallesche|aok\b|barmer|dak\b|ikk|bkk|pflegeversicherung|beihilfe|staatsoberkasse/i, sectionId:'hallesche_kv', typeId:'hallesche_kv_brief', label:'Kranken-/Pflegeversicherung', needsReview:false },
-  { pattern: /haftpflicht|hausratversicherung|geb.udeversicherung|rechtsschutz/i,                      sectionId:'sonstiges',       typeId:'sonstiges_allgemein',       label:'Versicherung',                needsReview:false },
+  { pattern: /haftpflicht|hausratversicherung|geb.udeversicherung|rechtsschutz/i,                      sectionId:'werbungskosten',  typeId:'werbungskosten_versicherung', label:'Versicherung',               needsReview:false },
   // ── USA: Social Security & TIAA — must come BEFORE Deutsche Rente rule ──
   { pattern: /social.security|federal.reserve.bank.*ny|ssa.?1099|ssn.*benefit|pymt.type.pens/i, sectionId:'usa', typeId:'social_security', label:'US Social Security', needsReview:false },
   { pattern: /\btiaa\b|tiaa.?cref|teachers.insurance|annuity.association/i,                      sectionId:'usa', typeId:'tiaa',            label:'TIAA Distribution',  needsReview:false },
@@ -2597,7 +3228,7 @@ const TAX_RULES = [
   { pattern: /kirchensteuer|kirchenbeitrag/i,                                                          sectionId:'kirche',          typeId:'kirchen_bescheid',          label:'Kirchensteuer',               needsReview:false },
   { pattern: /spende\b|caritas|rotes kreuz|unicef|greenpeace|diakonie|misereor|drk\b/i,               sectionId:'spenden',         typeId:'spenden_bescheinigung',     label:'Spende',                      needsReview:false },
   // ── Steuerberatung ──
-  { pattern: /steuerberatung|steuerberater|steuerburo|datev/i,                                        sectionId:'sonstiges',       typeId:'sonstiges_allgemein',       label:'Steuerberatung',              needsReview:false },
+  { pattern: /steuerberatung|steuerberater|steuerburo|datev|spreng.*sing|sing.*spreng|interconsult/i,  sectionId:'sonderausgaben',  typeId:'sonderausgaben_steuerberatung', label:'Steuerberatung',           needsReview:false },
   // ── American Express / Reise ──
   { pattern: /american express|amex/i,                                                                 sectionId:'american_express',typeId:'ae_steuerausgabe',          label:'American Express',            needsReview:false },
   { pattern: /hotel|flug|lufthansa|ryanair|eurowings|booking\.com|airbnb/i,                           sectionId:'american_express',typeId:'ae_steuerausgabe',          label:'Reisekosten',                 needsReview:false },
@@ -2835,6 +3466,7 @@ function parseCsv(text) {
           name: name || desc.substring(0,60), desc,
           taxLabel: rule.label + propNote,
           taxSectionId: sectionId, taxTypeId: typeId,
+          detectedPropId: detectedProp?.propId || null,
           detectedPropName: detectedProp?.propName || null,
           needsReview: rule.needsReview && !detectedProp,
           accepted: true
@@ -2850,6 +3482,7 @@ function parseCsv(text) {
         name: name || desc.substring(0,60), desc,
         taxLabel: `${detectedProp.propName} — Transaktion`,
         taxSectionId: detectedProp.sectionId, taxTypeId: detectedProp.typeId,
+        detectedPropId: detectedProp.propId || null,
         detectedPropName: detectedProp.propName,
         needsReview: false, accepted: true
       };
@@ -3167,6 +3800,7 @@ function parsePdfBank(text) {
           id: uid(), date: lastDate, name, desc, amt,
           taxLabel:     rule.label + (detectedProp ? ` · ${detectedProp.propName}` : ''),
           taxSectionId: sId, taxTypeId: tId,
+          detectedPropId: detectedProp?.propId || null,
           detectedPropName: detectedProp?.propName || null,
           needsReview:  rule.needsReview && !detectedProp,
           accepted: true
@@ -3180,6 +3814,7 @@ function parsePdfBank(text) {
         id: uid(), date: lastDate, name, desc, amt,
         taxLabel:     `${detectedProp.propName} — Transaktion`,
         taxSectionId: detectedProp.sectionId, taxTypeId: detectedProp.typeId,
+        detectedPropId: detectedProp.propId || null,
         detectedPropName: detectedProp.propName,
         needsReview: false, accepted: true
       });
@@ -3293,7 +3928,7 @@ function saveImportedTxs() {
     // Wohnungen transactions → save directly to imm_txs so financial dashboard works
     if (t.taxSectionId === 'wohnungen' || t.taxSectionId === 'garagen') {
       const fullText = (t.name||'') + ' ' + (t.desc||'');
-      const pid = detectPid(fullText);
+      const pid = t.detectedPropId || detectPid(fullText);
       const isInc = t.amt >= 0;
       // Pick category from taxLabel
       const lbl = (t.taxLabel||'').toLowerCase();
