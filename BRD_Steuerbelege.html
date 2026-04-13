@@ -6,7 +6,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="BRD Steuer">
-<title>BRD Steuerbelege</title>
+<title>BRD Steuerbelege v1.3</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
 <style>
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
@@ -1446,6 +1446,7 @@ function renderExport() {
       <div class="hero-lbl">Steuerbelege ${currentYear}</div>
       <div class="hero-num" style="font-size:36px">${all.length}</div>
       <div class="hero-sub">${all.length === 1 ? 'Dokument' : 'Dokumente'} · ${fCnt} ${fCnt === 1 ? 'Datei' : 'Dateien'}${wTxCount > 0 ? ' · ' + wTxCount + ' Buchungen' : ''}</div>
+      <div style="margin-top:8px;font-size:11px;opacity:0.5;font-family:monospace">v1.3 · ${new Date('2026-04-13').toLocaleDateString('de-DE')}</div>
     </div>
     <div class="sec-hdr">Zusammenfassung</div>
     <div class="card">${rows}</div>
@@ -1717,8 +1718,8 @@ function migrateWohnungenDocs() {
   const fixedTxs = existing.map(t => {
     let fix = { ...t };
     let dirty = false;
-    // Fix property assignment — check all available text fields
-    const text = (t.desc||'') + ' ' + (t.cat||'') + ' ' + (t.notes||'') + ' ' + (t.name||'');
+    // Fix property assignment
+    const text = (t.desc||'') + ' ' + (t.cat||'');
     const pid = detectPid(text);
     if (pid && pid !== t.pid) { fix.pid = pid; dirty = true; }
     // Fix wrong categories (e.g. "Schuldzinsen" for WEG/Hausgeld entries)
@@ -2157,6 +2158,83 @@ function wQuickDelete(id) {
   renderWohnungenSection();
 }
 
+// ─── Wertenachweis: per-category transaction drill-down ───
+function wRenderWertenachweis(pid, yr) {
+  const txs = wGetTxs().filter(t => t.pid === pid && t.date.startsWith(yr + ''));
+  if (!txs.length) return '';
+
+  const fmtDate = d => {
+    const p = d.split('-');
+    return p.length === 3 ? `${p[2]}.${p[1]}.${p[0]}` : d;
+  };
+
+  const groupByCat = arr => arr.reduce((m, t) => {
+    if (!m[t.cat]) m[t.cat] = [];
+    m[t.cat].push(t);
+    return m;
+  }, {});
+
+  const incTxs = txs.filter(t => t.type === 'income').sort((a,b) => a.date.localeCompare(b.date));
+  const expTxs = txs.filter(t => t.type === 'expense').sort((a,b) => a.date.localeCompare(b.date));
+  const incByCat = groupByCat(incTxs);
+  const expByCat = groupByCat(expTxs);
+
+  const wnId = 'wn_' + pid;
+
+  let h = `<div style="border-top:.5px solid var(--gray5)">
+    <button onclick="wToggleWN('${wnId}')"
+      style="width:100%;padding:11px 16px;background:none;border:none;display:flex;justify-content:space-between;align-items:center;cursor:pointer;font-family:inherit;color:var(--blue);font-size:13px;font-weight:600">
+      <span>📋 Wertenachweis</span>
+      <span id="wn_chev_${pid}" style="font-size:11px;color:var(--gray1)">▼ anzeigen</span>
+    </button>
+    <div id="${wnId}" style="display:none">`;
+
+  // ── Einnahmen ──
+  Object.entries(incByCat).forEach(([cat, catTxs]) => {
+    const total = catTxs.reduce((s, t) => s + t.amt, 0);
+    h += `<div style="background:#F0FDF4;padding:7px 16px 5px;font-size:11px;font-weight:700;color:#166534;text-transform:uppercase;letter-spacing:.5px;border-top:.5px solid var(--gray5)">${cat} · ${catTxs.length} Buchungen</div>`;
+    catTxs.forEach(t => {
+      const desc = t.desc ? (t.desc.length > 32 ? t.desc.substring(0, 32) + '\u2026' : t.desc) : '\u2014';
+      h += `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 16px 5px 20px;border-bottom:.5px solid var(--gray6);gap:8px">
+        <span style="font-size:12px;color:var(--gray1);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${fmtDate(t.date)} \u00b7 ${desc}</span>
+        <span style="font-size:12px;color:var(--green);font-weight:500;white-space:nowrap">+${wEur(t.amt)}</span>
+      </div>`;
+    });
+    h += `<div style="display:flex;justify-content:space-between;padding:6px 16px;font-size:12px;font-weight:700;background:#DCFCE7;border-top:.5px solid var(--gray5)">
+      <span>Summe ${cat}</span><span style="color:var(--green)">+${wEur(total)}</span>
+    </div>`;
+  });
+
+  // ── Ausgaben ──
+  Object.entries(expByCat).forEach(([cat, catTxs]) => {
+    const total = catTxs.reduce((s, t) => s + t.amt, 0);
+    h += `<div style="background:#FFF5F5;padding:7px 16px 5px;font-size:11px;font-weight:700;color:#991B1B;text-transform:uppercase;letter-spacing:.5px;border-top:.5px solid var(--gray5)">${cat} · ${catTxs.length} Buchungen</div>`;
+    catTxs.forEach(t => {
+      const desc = t.desc ? (t.desc.length > 32 ? t.desc.substring(0, 32) + '\u2026' : t.desc) : '\u2014';
+      h += `<div style="display:flex;justify-content:space-between;align-items:center;padding:5px 16px 5px 20px;border-bottom:.5px solid var(--gray6);gap:8px">
+        <span style="font-size:12px;color:var(--gray1);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${fmtDate(t.date)} \u00b7 ${desc}</span>
+        <span style="font-size:12px;color:var(--red);font-weight:500;white-space:nowrap">\u2212${wEur(t.amt)}</span>
+      </div>`;
+    });
+    h += `<div style="display:flex;justify-content:space-between;padding:6px 16px;font-size:12px;font-weight:700;background:#FFE4E4;border-top:.5px solid var(--gray5)">
+      <span>Summe ${cat}</span><span style="color:var(--red)">\u2212${wEur(total)}</span>
+    </div>`;
+  });
+
+  h += `</div></div>`;
+  return h;
+}
+
+function wToggleWN(id) {
+  const el   = document.getElementById(id);
+  const pid  = id.replace('wn_', '');
+  const chev = document.getElementById('wn_chev_' + pid);
+  if (!el) return;
+  const open = el.style.display === 'none';
+  el.style.display = open ? 'block' : 'none';
+  if (chev) chev.textContent = open ? '\u25b2 ausblenden' : '\u25bc anzeigen';
+}
+
 // ─── Anlage V (Tax) ───
 function wRenderTax() {
   const yr  = currentYear;
@@ -2214,7 +2292,9 @@ function wRenderTax() {
     h += `<div style="display:flex;justify-content:space-between;align-items:center;margin:10px 16px;border-radius:12px;padding:12px 16px;background:${rBg}">
       <span style="font-size:14px;font-weight:600">Überschuss / Verlust</span>
       <span style="font-size:20px;font-weight:700;color:${rCol}">${rs}${wEur(ps.res)}</span>
-    </div></div>`;
+    </div>`;
+    h += wRenderWertenachweis(p.id, yr);
+    h += `</div>`;
   });
 
   h += `<button class="export-btn" style="margin-top:12px" onclick="wDoExport()">
@@ -2405,15 +2485,52 @@ function wDoExport() {
   txt += `  Gesamteinnahmen:        ${wEur(tot.inc).padStart(12)}\n`;
   txt += `  Gesamte Werbungskosten: ${wEur(tot.exp).padStart(12)}\n`;
   txt += `  Überschuss / Verlust:   ${wEur(tot.res).padStart(12)}\n\n`;
+  const fmtD = d => { const p=d.split('-'); return p.length===3?`${p[2]}.${p[1]}.${p[0]}`:d; };
+  const groupByCat = arr => arr.reduce((m,t)=>{ if(!m[t.cat])m[t.cat]=[]; m[t.cat].push(t); return m; },{});
+
   PROPS_W.forEach(p => {
     const ps=wPropStats(p.id,yr); if(!ps.n) return;
-    const ebc=wExpByCat(p.id,yr), ibc=wIncByCat(p.id,yr);
+    const allTxs = wGetTxs().filter(t=>t.pid===p.id&&t.date.startsWith(yr+''));
+    const incTxs = allTxs.filter(t=>t.type==='income').sort((a,b)=>a.date.localeCompare(b.date));
+    const expTxs = allTxs.filter(t=>t.type==='expense').sort((a,b)=>a.date.localeCompare(b.date));
+    const ibc = groupByCat(incTxs);
+    const ebc = groupByCat(expTxs);
     const expTenant = p.tenant ? ` (Mieter: ${p.tenant})` : '';
-    txt += `\n${'─'.repeat(52)}\n  OBJEKT: ${p.name}${expTenant}\n${'─'.repeat(52)}\n  EINNAHMEN:\n`;
-    if(!Object.keys(ibc).length) txt+=`    (keine)\n`; else Object.entries(ibc).forEach(([c,a])=>txt+=`    ${c.padEnd(34)} ${wEur(a).padStart(10)}\n`);
-    txt += `  Summe Einnahmen:      ${wEur(ps.inc).padStart(12)}\n\n  WERBUNGSKOSTEN:\n`;
-    if(!Object.keys(ebc).length) txt+=`    (keine)\n`; else Object.entries(ebc).forEach(([c,a])=>txt+=`    ${c.padEnd(34)} ${wEur(a).padStart(10)}\n`);
-    txt += `  Summe Werbungskosten: ${wEur(ps.exp).padStart(12)}\n  ► ERGEBNIS:           ${((ps.res>=0?'+':'')+wEur(ps.res)).padStart(12)}\n`;
+
+    txt += `\n${'═'.repeat(52)}\n  OBJEKT: ${p.name}${expTenant}\n${'═'.repeat(52)}\n`;
+    txt += `  Einnahmen:      ${wEur(ps.inc).padStart(12)}\n`;
+    txt += `  Werbungskosten: ${('-'+wEur(ps.exp)).padStart(12)}\n`;
+    txt += `  ► ERGEBNIS:     ${((ps.res>=0?'+':'')+wEur(ps.res)).padStart(12)}\n`;
+
+    txt += `\n  WERTENACHWEIS\n${'─'.repeat(52)}\n`;
+
+    // Income categories with individual transactions
+    if (Object.keys(ibc).length) {
+      txt += `  EINNAHMEN\n`;
+      Object.entries(ibc).forEach(([cat, catTxs]) => {
+        const total = catTxs.reduce((s,t)=>s+t.amt,0);
+        txt += `    ${cat} (${catTxs.length} Buchungen)\n`;
+        catTxs.forEach(t => {
+          const desc = (t.desc||'—').substring(0,36);
+          txt += `      ${fmtD(t.date).padEnd(12)} ${desc.padEnd(38)} +${wEur(t.amt)}\n`;
+        });
+        txt += `    ${'Summe '+cat}`.padEnd(52)+` +${wEur(total)}\n\n`;
+      });
+    }
+
+    // Expense categories with individual transactions
+    if (Object.keys(ebc).length) {
+      txt += `  WERBUNGSKOSTEN\n`;
+      Object.entries(ebc).forEach(([cat, catTxs]) => {
+        const total = catTxs.reduce((s,t)=>s+t.amt,0);
+        txt += `    ${cat} (${catTxs.length} Buchungen)\n`;
+        catTxs.forEach(t => {
+          const desc = (t.desc||'—').substring(0,36);
+          txt += `      ${fmtD(t.date).padEnd(12)} ${desc.padEnd(38)} -${wEur(t.amt)}\n`;
+        });
+        txt += `    ${'Summe '+cat}`.padEnd(52)+` -${wEur(total)}\n\n`;
+      });
+    }
   });
   txt += `\n${'═'.repeat(52)}\n  Anlage V – §21 EStG\n${'═'.repeat(52)}\n`;
   const blob = new Blob([txt],{type:'text/plain;charset=utf-8'});
@@ -2718,7 +2835,6 @@ function parseCsv(text) {
           name: name || desc.substring(0,60), desc,
           taxLabel: rule.label + propNote,
           taxSectionId: sectionId, taxTypeId: typeId,
-          detectedPropId: detectedProp?.propId || null,
           detectedPropName: detectedProp?.propName || null,
           needsReview: rule.needsReview && !detectedProp,
           accepted: true
@@ -2734,7 +2850,6 @@ function parseCsv(text) {
         name: name || desc.substring(0,60), desc,
         taxLabel: `${detectedProp.propName} — Transaktion`,
         taxSectionId: detectedProp.sectionId, taxTypeId: detectedProp.typeId,
-        detectedPropId: detectedProp.propId || null,
         detectedPropName: detectedProp.propName,
         needsReview: false, accepted: true
       };
@@ -3052,7 +3167,6 @@ function parsePdfBank(text) {
           id: uid(), date: lastDate, name, desc, amt,
           taxLabel:     rule.label + (detectedProp ? ` · ${detectedProp.propName}` : ''),
           taxSectionId: sId, taxTypeId: tId,
-          detectedPropId: detectedProp?.propId || null,
           detectedPropName: detectedProp?.propName || null,
           needsReview:  rule.needsReview && !detectedProp,
           accepted: true
@@ -3066,7 +3180,6 @@ function parsePdfBank(text) {
         id: uid(), date: lastDate, name, desc, amt,
         taxLabel:     `${detectedProp.propName} — Transaktion`,
         taxSectionId: detectedProp.sectionId, taxTypeId: detectedProp.typeId,
-        detectedPropId: detectedProp.propId || null,
         detectedPropName: detectedProp.propName,
         needsReview: false, accepted: true
       });
@@ -3180,7 +3293,7 @@ function saveImportedTxs() {
     // Wohnungen transactions → save directly to imm_txs so financial dashboard works
     if (t.taxSectionId === 'wohnungen' || t.taxSectionId === 'garagen') {
       const fullText = (t.name||'') + ' ' + (t.desc||'');
-      const pid = t.detectedPropId || detectPid(fullText);
+      const pid = detectPid(fullText);
       const isInc = t.amt >= 0;
       // Pick category from taxLabel
       const lbl = (t.taxLabel||'').toLowerCase();
