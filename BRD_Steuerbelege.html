@@ -739,7 +739,7 @@ function renderOverview() {
 
   let html = `
     <div class="hero-card">
-      <div class="hero-lbl">Steuerbelege ${currentYear} <span style="font-size:10px;opacity:.5">v45</span></div>
+      <div class="hero-lbl">Steuerbelege ${currentYear} <span style="font-size:10px;opacity:.5">v46</span></div>
       <div class="hero-num">${all.length}</div>
       <div class="hero-sub">${all.length === 1 ? 'Dokument' : 'Dokumente'} · ${totalFiles} ${totalFiles === 1 ? 'Datei' : 'Dateien'}</div>
     </div>
@@ -2045,7 +2045,7 @@ function renderGaragenSection() {
       html += `</div>`;
     }
   } else if (wTab === 'txs') {
-    let txs = wGetTxs().filter(t=>garProps.some(p=>p.id===t.pid));
+    let txs = wGetTxs().filter(t=>garProps.some(p=>p.id===t.pid) && t.date.startsWith(yr+''));
     if (wFilter !== 'all') txs = txs.filter(t=>t.pid===wFilter);
     txs = [...txs].sort((a,b)=>b.date.localeCompare(a.date));
 
@@ -2198,7 +2198,7 @@ function wJumpToTxs(pid) { wFilter = pid; wSetTab('txs'); }
 function wRenderTxs() {
   const yr  = currentYear;
   const garIdsT = new Set(PROPS_W.filter(p=>p.g).map(p=>p.id));
-  let txs   = wGetTxs().filter(t => !garIdsT.has(t.pid));
+  let txs   = wGetTxs().filter(t => !garIdsT.has(t.pid) && t.date.startsWith(yr+''));
   if (wFilter !== 'all') txs = txs.filter(t=>t.pid===wFilter);
   txs = [...txs].sort((a,b)=>b.date.localeCompare(a.date));
 
