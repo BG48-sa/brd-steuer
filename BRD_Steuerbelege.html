@@ -739,7 +739,7 @@ function renderOverview() {
 
   let html = `
     <div class="hero-card">
-      <div class="hero-lbl">Steuerbelege ${currentYear} <span style="font-size:10px;opacity:.5">v46</span></div>
+      <div class="hero-lbl">Steuerbelege ${currentYear} <span style="font-size:10px;opacity:.5">v47</span></div>
       <div class="hero-num">${all.length}</div>
       <div class="hero-sub">${all.length === 1 ? 'Dokument' : 'Dokumente'} · ${totalFiles} ${totalFiles === 1 ? 'Datei' : 'Dateien'}</div>
     </div>
@@ -2094,7 +2094,7 @@ function renderGaragenSection() {
         <div style="font-size:30px;font-weight:700;margin:3px 0 10px;letter-spacing:-.3px">${sign}${wEur(st.res)}</div>
         <div style="font-size:13px;opacity:.75;display:flex;gap:16px"><span>📈 ${wEur(st.inc)}</span><span>📉 ${wEur(st.exp)}</span></div>
       </div>`;
-    garProps.filter(p=>wPropStats(p.id,yr).n>0).forEach(p => {
+    garProps.forEach(p => {
       const ps = wPropStats(p.id,yr);
       const ebc = wExpByCat(p.id,yr);
       const ibc = wIncByCat(p.id,yr);
@@ -2116,9 +2116,6 @@ function renderGaragenSection() {
           <span style="font-size:20px;font-weight:700;color:${rCol}">${rs}${wEur(ps.res)}</span>
         </div></div>`;
     });
-    if (!garProps.some(p=>wPropStats(p.id,yr).n>0)) {
-      html += `<div class="empty"><div class="ico">📊</div><h3>Keine Daten für ${yr}</h3><p>Erfasse Buchungen um die<br>Steuerübersicht zu sehen.</p></div>`;
-    }
   }
 
   html += '<div class="spacer"></div>';
@@ -2416,7 +2413,7 @@ function wRenderTax() {
   const yr  = currentYear;
   const tot = wAllStats(yr);
   const sign = tot.res>=0?'+':'';
-  const active = PROPS_W.filter(p=>!p.g && wPropStats(p.id,yr).n>0);
+  const allProps = PROPS_W.filter(p=>!p.g);
 
   let h = `
     <div style="background:linear-gradient(135deg,#1C1C1E,#2C2C2E);color:white;border-radius:20px;margin:12px 16px 0;padding:18px 20px;box-shadow:0 4px 16px rgba(0,0,0,0.3)">
@@ -2427,12 +2424,7 @@ function wRenderTax() {
       </div>
     </div>`;
 
-  if (!active.length) {
-    h += `<div class="empty"><div class="ico">📊</div><h3>Keine Daten für ${yr}</h3><p>Erfasse Buchungen um die<br>Steuerübersicht zu sehen.</p></div>`;
-    return h;
-  }
-
-  active.forEach(p => {
+  allProps.forEach(p => {
     const ps  = wPropStats(p.id,yr);
     const ebc = wExpByCat(p.id,yr);
     const ibc = wIncByCat(p.id,yr);
