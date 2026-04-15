@@ -739,7 +739,7 @@ function renderOverview() {
 
   let html = `
     <div class="hero-card">
-      <div class="hero-lbl">Steuerbelege ${currentYear} <span style="font-size:10px;opacity:.5">v47</span></div>
+      <div class="hero-lbl">Steuerbelege ${currentYear} <span style="font-size:10px;opacity:.5">v48</span></div>
       <div class="hero-num">${all.length}</div>
       <div class="hero-sub">${all.length === 1 ? 'Dokument' : 'Dokumente'} · ${totalFiles} ${totalFiles === 1 ? 'Datei' : 'Dateien'}</div>
     </div>
@@ -4011,11 +4011,17 @@ async function doBackup() {
     });
 
     // 2. convert ArrayBuffer data to base64 for JSON storage
+    const toBase64 = (buf) => {
+      const bytes = new Uint8Array(buf);
+      let bin = '';
+      for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+      return btoa(bin);
+    };
     const filesB64 = fileRecords.map(r => ({
       id:   r.id,
       name: r.name,
       type: r.type,
-      data: btoa(String.fromCharCode(...new Uint8Array(r.data)))
+      data: toBase64(r.data)
     }));
 
     // 3. assemble backup object
